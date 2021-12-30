@@ -53530,6 +53530,7 @@ var app = (function () {
         // Used to predict movement of other players to avoid glitch due to poor connection
         calculateFakeMovement(delta) {
             if (this.isMoving && this.lastDistanceMoved == this.distanceMoved) {
+                console.log("calc fake");
                 this.mesh.translateOnAxis(this.direction, Pacman.PACMAN_SPEED * delta);
                 this.distanceMoved += Pacman.PACMAN_SPEED * delta;
             }
@@ -53550,12 +53551,10 @@ var app = (function () {
             if (keys.getKeyState('KeyA') || keys.getKeyState('ArrowLeft')) {
                 // A - rotate left
                 this.direction.applyAxisAngle(Utils.UP, Math.PI / 2 * delta);
-                this.isMoving = true;
             }
             if (keys.getKeyState('KeyD') || keys.getKeyState('ArrowRight')) {
                 // D - rotate right
                 this.direction.applyAxisAngle(Utils.UP, -Math.PI / 2 * delta);
-                this.isMoving = true;
             }
             if (keys.getKeyState('KeyS') || keys.getKeyState('ArrowDown')) {
                 // S - move backward
@@ -53616,15 +53615,14 @@ var app = (function () {
             obj["position"] = [this.mesh.position.x, this.mesh.position.y, this.mesh.position.z];
             obj["direction"] = [this.direction.x, this.direction.y, this.direction.z];
             obj["distanceMoved"] = this.distanceMoved;
+            obj["isMoving"] = this.isMoving;
             return obj;
         }
         // New pacman from plain js object
         static fromObj(obj) {
             let position = new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]);
-            let direction = new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]);
             let out = new Pacman(obj["id"], position);
-            out.direction = direction;
-            out.distanceMoved = obj["distanceMoved"];
+            out.copyObj(obj);
             return out;
         }
         // Copy from a js plain object
@@ -53639,6 +53637,7 @@ var app = (function () {
             this.mesh.position.copy(new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]));
             this.direction.copy(new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]));
             this.distanceMoved = obj["distanceMoved"];
+            this.isMoving = obj["isMoving"];
         }
         // Copy object if it has the same id
         copyObjIfSameId(obj) {
@@ -56031,7 +56030,7 @@ var app = (function () {
     function instance($$self, $$props, $$invalidate) {
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('App', slots, []);
-    	console.log("version 0.0.2");
+    	console.log("version 0.0.3");
     	let game = new Game();
     	let keys = new KeyState();
     	let renderer = game.createRenderer();

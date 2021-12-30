@@ -10,7 +10,7 @@ import { GameState } from './state';
 import { Utils } from './utils';
 
 //main()
-console.log("version 0.0.2")
+console.log("version 0.0.3")
 let game = new Game()
 let keys = new KeyState()
 let renderer = game.createRenderer()
@@ -40,7 +40,7 @@ game.gameLoop( (delta) => {
 
 	// Set my pacman state
 	state.setPacman(pacman)
-	
+
 	// Update other pacman frames
 	for( let p of state.getPacmans()){
 		if(p.id != pacman.id){

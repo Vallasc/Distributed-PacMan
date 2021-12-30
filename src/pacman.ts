@@ -79,7 +79,8 @@ export class Pacman extends AbstractType<any>{
 
     // Used to predict movement of other players to avoid glitch due to poor connection
     public calculateFakeMovement(delta: number) {
-        if(this.isMoving && this.lastDistanceMoved == this.distanceMoved){
+        if( this.isMoving && this.lastDistanceMoved == this.distanceMoved ){
+            console.log("calc fake")
             this.mesh.translateOnAxis(this.direction, Pacman.PACMAN_SPEED * delta)
             this.distanceMoved += Pacman.PACMAN_SPEED * delta
         }
@@ -102,12 +103,10 @@ export class Pacman extends AbstractType<any>{
         if (keys.getKeyState('KeyA') || keys.getKeyState('ArrowLeft')) {
             // A - rotate left
             this.direction.applyAxisAngle(Utils.UP, Math.PI / 2 * delta)
-            this.isMoving = true
         }
         if (keys.getKeyState('KeyD') || keys.getKeyState('ArrowRight')) {
             // D - rotate right
             this.direction.applyAxisAngle(Utils.UP, -Math.PI / 2 * delta)
-            this.isMoving = true
         }
         if (keys.getKeyState('KeyS') || keys.getKeyState('ArrowDown')) {
             // S - move backward
@@ -177,16 +176,15 @@ export class Pacman extends AbstractType<any>{
         obj["position"] = [ this.mesh.position.x, this.mesh.position.y, this.mesh.position.z]
         obj["direction"] = [ this.direction.x, this.direction.y, this.direction.z]
         obj["distanceMoved"] = this.distanceMoved
+        obj["isMoving"] = this.isMoving
         return obj
     }
 
     // New pacman from plain js object
     public static fromObj(obj: any): Pacman {
         let position = new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2])
-        let direction = new THREE.Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2])
         let out = new Pacman(obj["id"], position)
-        out.direction = direction
-        out.distanceMoved = obj["distanceMoved"]
+        out.copyObj(obj)
         return out
     }
 
@@ -203,6 +201,7 @@ export class Pacman extends AbstractType<any>{
         this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))
         this.direction.copy(new THREE.Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]))
         this.distanceMoved = obj["distanceMoved"]
+        this.isMoving = obj["isMoving"]
     }
 
     // Copy object if it has the same id
