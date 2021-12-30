@@ -56000,7 +56000,7 @@ var app = (function () {
     		c: function create() {
     			div = element("div");
     			attr_dev(div, "class", "init svelte-3ssu1j");
-    			add_location(div, file, 56, 0, 1706);
+    			add_location(div, file, 56, 0, 1707);
     		},
     		l: function claim(nodes) {
     			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
@@ -56030,7 +56030,7 @@ var app = (function () {
     function instance($$self, $$props, $$invalidate) {
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('App', slots, []);
-    	console.log("version 0.0.3");
+    	console.log("version 0.0.4");
     	let game = new Game();
     	let keys = new KeyState();
     	let renderer = game.createRenderer();
@@ -56063,8 +56063,7 @@ var app = (function () {
     		for (let p of state.getPacmans()) {
     			if (p.id != pacman.id) {
     				p.updateFrame();
-    				p.calculateFakeMovement(delta);
-    			}
+    			} //p.calculateFakeMovement(delta)
     		}
 
     		// Render main view

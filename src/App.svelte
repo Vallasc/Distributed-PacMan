@@ -10,7 +10,7 @@ import { GameState } from './state';
 import { Utils } from './utils';
 
 //main()
-console.log("version 0.0.3")
+console.log("version 0.0.4")
 let game = new Game()
 let keys = new KeyState()
 let renderer = game.createRenderer()
@@ -45,7 +45,7 @@ game.gameLoop( (delta) => {
 	for( let p of state.getPacmans()){
 		if(p.id != pacman.id){
 			p.updateFrame()
-			p.calculateFakeMovement(delta)
+			//p.calculateFakeMovement(delta)
 		}
 	}
 
