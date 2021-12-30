@@ -10,7 +10,7 @@ import { GameState } from './state';
 import { Utils } from './utils';
 
 //main()
-console.log("version 0.0.1")
+console.log("version 0.0.2")
 let game = new Game()
 let keys = new KeyState()
 let renderer = game.createRenderer()
@@ -29,16 +29,26 @@ let remove = []
 let frameCounter = 0
 // Main game loop
 game.gameLoop( (delta) => {
-	pacman.movePacman(delta, keys, map, state)
-	//pacman.updatePacman()
-	camera.updateCamera(delta, pacman)
-
-	state.setPacman(pacman)
-	for( let p of state.getPacmans()){
-		p.updateFrame()
-	}
+	// Update local list of pacman
 	state.updatePacmanLocal(pacman.id)
 	state.updateDotsLocal()
+
+	pacman.movePacman(delta, keys, map, state)
+	pacman.updateFrame()
+
+	camera.updateCamera(delta, pacman)
+
+	// Set my pacman state
+	state.setPacman(pacman)
+	
+	// Update other pacman frames
+	for( let p of state.getPacmans()){
+		if(p.id != pacman.id){
+			p.updateFrame()
+			p.calculateFakeMovement(delta)
+		}
+	}
+
 	if(frameCounter % 5 == 0){
 
 	}

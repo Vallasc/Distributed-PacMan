@@ -4,7 +4,7 @@ import type { KeyState } from "./key_state"
 import type { LevelMap } from "./level_map"
 import type { GameState } from "./state"
 import { Utils } from "./utils"
-import * as TWEEN from "@tweenjs/tween.js"
+//import * as TWEEN from "@tweenjs/tween.js"
 
 
 export class Pacman extends AbstractType<any>{
@@ -18,12 +18,13 @@ export class Pacman extends AbstractType<any>{
     
     public id: string
     private distanceMoved: number
+    private lastDistanceMoved: number
     public direction: THREE.Vector3
     public isMoving: boolean
     public frameCounter: number
     //public numDotsEaten: number
     //public atePellet: boolean
-    private tweenAnimation: TWEEN.Tween<THREE.Vector3> | null
+    //private tweenAnimation: TWEEN.Tween<THREE.Vector3> | null
     public deletedFlag: number = 0
 
     constructor(name: string, position: THREE.Vector3) {
@@ -45,6 +46,7 @@ export class Pacman extends AbstractType<any>{
         //this.currentFrame = 0
 
         this.distanceMoved = 0
+        this.lastDistanceMoved = 0
 
         // Initialize pacman facing to the left.
         this.mesh.position.copy(position)
@@ -54,7 +56,7 @@ export class Pacman extends AbstractType<any>{
         this.id = name
         this.frameCounter = 0
         this.isMoving = false
-        this.tweenAnimation = null
+        //this.tweenAnimation = null
     }
 
     // Update pacman mesh simulating the eat movement
@@ -77,9 +79,11 @@ export class Pacman extends AbstractType<any>{
 
     // Used to predict movement of other players to avoid glitch due to poor connection
     public calculateFakeMovement(delta: number) {
-        if(this.isMoving){
-            this.mesh.translateOnAxis(Utils.LEFT, Pacman.PACMAN_SPEED * delta)
+        if(this.isMoving && this.lastDistanceMoved == this.distanceMoved){
+            this.mesh.translateOnAxis(this.direction, Pacman.PACMAN_SPEED * delta)
+            this.distanceMoved += Pacman.PACMAN_SPEED * delta
         }
+        this.lastDistanceMoved = this.distanceMoved
     }
 
     // Elaborate key pressed and change pacman position
@@ -188,15 +192,15 @@ export class Pacman extends AbstractType<any>{
 
     // Copy from a js plain object
     public copyObj(obj: any) {
-        if(this.tweenAnimation != null) {
+        /*if(this.tweenAnimation != null) {
             this.tweenAnimation.end()
             this.tweenAnimation.stop()
         } 
         this.tweenAnimation = new TWEEN.Tween(this.mesh.position)
                             .to(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]), 500)
-                            .start()
+                            .start()*/
         
-        //this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))
+        this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))
         this.direction.copy(new THREE.Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]))
         this.distanceMoved = obj["distanceMoved"]
     }

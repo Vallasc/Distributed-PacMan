@@ -39,7 +39,9 @@ export class Ghost {
     // Make 3d mesh
     public makeMesh(position: THREE.Vector3) {
         let dotMaterial = new THREE.MeshPhongMaterial({ color: 'red', side: THREE.DoubleSide })
+        dotMaterial.flatShading = false
         this.mesh = new THREE.Mesh(Ghost.loadedGeometry, dotMaterial)
+        this.mesh.geometry.computeVertexNormals()
         this.mesh.position.set(position.x, position.y, position.z + Ghost.Z_OFFSET)
         this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
     }
