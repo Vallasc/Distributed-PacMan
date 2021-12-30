@@ -193,7 +193,7 @@ export class Pacman extends AbstractType<any>{
             this.tweenAnimation.stop()
         } 
         this.tweenAnimation = new TWEEN.Tween(this.mesh.position)
-                            .to(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]), 50)
+                            .to(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]), 500)
                             .start()
         
         //this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))

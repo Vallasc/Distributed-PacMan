@@ -10,7 +10,7 @@ import { GameState } from './state';
 import { Utils } from './utils';
 
 //main()
-
+console.log("version 0.0.1")
 let game = new Game()
 let keys = new KeyState()
 let renderer = game.createRenderer()
