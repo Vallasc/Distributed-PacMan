@@ -4,7 +4,7 @@ import type { KeyState } from "./key_state"
 import type { LevelMap } from "./level_map"
 import type { GameState } from "./state"
 import { Utils } from "./utils"
-//import * as TWEEN from "@tweenjs/tween.js"
+import * as TWEEN from "@tweenjs/tween.js"
 
 
 export class Pacman extends AbstractType<any>{
@@ -23,7 +23,7 @@ export class Pacman extends AbstractType<any>{
     public frameCounter: number
     //public numDotsEaten: number
     //public atePellet: boolean
-    //private tweenAnimation: TWEEN.Tween<THREE.Vector3> | null
+    private tweenAnimation: TWEEN.Tween<THREE.Vector3> | null
     public deletedFlag: number = 0
 
     constructor(name: string, position: THREE.Vector3) {
@@ -192,11 +192,11 @@ export class Pacman extends AbstractType<any>{
             this.tweenAnimation.end()
             this.tweenAnimation.stop()
         } 
-        /*this.tweenAnimation = new TWEEN.Tween(this.mesh.position)
-                            .to(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]), 20)
-                            .start()*/
+        this.tweenAnimation = new TWEEN.Tween(this.mesh.position)
+                            .to(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]), 50)
+                            .start()
         
-        this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))
+        //this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))
         this.direction.copy(new THREE.Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]))
         this.distanceMoved = obj["distanceMoved"]
     }
