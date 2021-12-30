@@ -1,30 +1,71 @@
 <script lang="ts">
-	export let name: string;
+import { onMount } from 'svelte'
+import * as THREE from 'three'
+import { Camera } from './camera';
+import { Game } from './game'
+import { KeyState } from './key_state';
+import { LevelMap } from './level_map';
+import { Pacman } from './pacman';
+import { GameState } from './state';
+import { Utils } from './utils';
+
+//main()
+
+let game = new Game()
+let keys = new KeyState()
+let renderer = game.createRenderer()
+let scene = game.createScene()
+
+let state = new GameState(scene)
+
+let map = new LevelMap(scene, state)
+let camera = new Camera()
+let pacman =  new Pacman(Date.now().toString(), map.pacmanSpawn)
+pacman.addToScene(scene)
+
+//let hudCamera = game.createHudCamera(map)
+let remove = []
+
+let frameCounter = 0
+// Main game loop
+game.gameLoop( (delta) => {
+	pacman.movePacman(delta, keys, map, state)
+	//pacman.updatePacman()
+	camera.updateCamera(delta, pacman)
+
+	state.setPacman(pacman)
+	for( let p of state.getPacmans()){
+		p.updateFrame()
+	}
+	state.updatePacmanLocal(pacman.id)
+	state.updateDotsLocal()
+	if(frameCounter % 5 == 0){
+
+	}
+	// Render main view
+	renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height)
+	renderer.render(scene, camera.get())
+
+	// Render HUD
+	//renderHud(renderer, hudCamera, scene)
+	frameCounter++;
+})
+
+setInterval(() => {
+	//console.log(state.getPacmans())
+	//state.setPacman(pacman)
+	//state.updatePacmanState()
+}, 300)
+
 </script>
 
-<main>
-	<h1>Hello {name}!</h1>
-	<p>Visit the <a href="https://svelte.dev/tutorial">Svelte tutorial</a> to learn how to build Svelte apps.</p>
-</main>
+<div class="init">
+
+</div>
 
 <style>
-	main {
-		text-align: center;
-		padding: 1em;
-		max-width: 240px;
-		margin: 0 auto;
-	}
+.init {
+	width: 100%;
+}
 
-	h1 {
-		color: #ff3e00;
-		text-transform: uppercase;
-		font-size: 4em;
-		font-weight: 100;
-	}
-
-	@media (min-width: 640px) {
-		main {
-			max-width: none;
-		}
-	}
 </style>
