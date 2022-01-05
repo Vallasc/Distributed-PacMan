@@ -4,6 +4,7 @@ var app = (function () {
     'use strict';
 
     function noop() { }
+    const identity = x => x;
     function add_location(element, file, line, column, char) {
         element.__svelte_meta = {
             loc: { file, line, column, char }
@@ -24,8 +25,86 @@ var app = (function () {
     function safe_not_equal(a, b) {
         return a != a ? b == b : a !== b || ((a && typeof a === 'object') || typeof a === 'function');
     }
+    let src_url_equal_anchor;
+    function src_url_equal(element_src, url) {
+        if (!src_url_equal_anchor) {
+            src_url_equal_anchor = document.createElement('a');
+        }
+        src_url_equal_anchor.href = url;
+        return element_src === src_url_equal_anchor.href;
+    }
     function is_empty(obj) {
         return Object.keys(obj).length === 0;
+    }
+    function validate_store(store, name) {
+        if (store != null && typeof store.subscribe !== 'function') {
+            throw new Error(`'${name}' is not a store with a 'subscribe' method`);
+        }
+    }
+    function subscribe$1(store, ...callbacks) {
+        if (store == null) {
+            return noop;
+        }
+        const unsub = store.subscribe(...callbacks);
+        return unsub.unsubscribe ? () => unsub.unsubscribe() : unsub;
+    }
+    function component_subscribe(component, store, callback) {
+        component.$$.on_destroy.push(subscribe$1(store, callback));
+    }
+
+    const is_client = typeof window !== 'undefined';
+    let now = is_client
+        ? () => window.performance.now()
+        : () => Date.now();
+    let raf = is_client ? cb => requestAnimationFrame(cb) : noop;
+
+    const tasks = new Set();
+    function run_tasks(now) {
+        tasks.forEach(task => {
+            if (!task.c(now)) {
+                tasks.delete(task);
+                task.f();
+            }
+        });
+        if (tasks.size !== 0)
+            raf(run_tasks);
+    }
+    /**
+     * Creates a new task that runs on each raf frame
+     * until it returns a falsy value or is aborted
+     */
+    function loop(callback) {
+        let task;
+        if (tasks.size === 0)
+            raf(run_tasks);
+        return {
+            promise: new Promise(fulfill => {
+                tasks.add(task = { c: callback, f: fulfill });
+            }),
+            abort() {
+                tasks.delete(task);
+            }
+        };
+    }
+    function append(target, node) {
+        target.appendChild(node);
+    }
+    function get_root_for_style(node) {
+        if (!node)
+            return document;
+        const root = node.getRootNode ? node.getRootNode() : node.ownerDocument;
+        if (root && root.host) {
+            return root;
+        }
+        return node.ownerDocument;
+    }
+    function append_empty_stylesheet(node) {
+        const style_element = element('style');
+        append_stylesheet(get_root_for_style(node), style_element);
+        return style_element;
+    }
+    function append_stylesheet(node, style) {
+        append(node.head || node, style);
     }
     function insert(target, node, anchor) {
         target.insertBefore(node, anchor || null);
@@ -33,8 +112,27 @@ var app = (function () {
     function detach(node) {
         node.parentNode.removeChild(node);
     }
+    function destroy_each(iterations, detaching) {
+        for (let i = 0; i < iterations.length; i += 1) {
+            if (iterations[i])
+                iterations[i].d(detaching);
+        }
+    }
     function element(name) {
         return document.createElement(name);
+    }
+    function text(data) {
+        return document.createTextNode(data);
+    }
+    function space() {
+        return text(' ');
+    }
+    function empty() {
+        return text('');
+    }
+    function listen(node, event, handler, options) {
+        node.addEventListener(event, handler, options);
+        return () => node.removeEventListener(event, handler, options);
     }
     function attr(node, attribute, value) {
         if (value == null)
@@ -45,15 +143,93 @@ var app = (function () {
     function children(element) {
         return Array.from(element.childNodes);
     }
+    function set_input_value(input, value) {
+        input.value = value == null ? '' : value;
+    }
+    function set_style(node, key, value, important) {
+        node.style.setProperty(key, value, important ? 'important' : '');
+    }
     function custom_event(type, detail, bubbles = false) {
         const e = document.createEvent('CustomEvent');
         e.initCustomEvent(type, bubbles, false, detail);
         return e;
     }
 
+    const active_docs = new Set();
+    let active = 0;
+    // https://github.com/darkskyapp/string-hash/blob/master/index.js
+    function hash(str) {
+        let hash = 5381;
+        let i = str.length;
+        while (i--)
+            hash = ((hash << 5) - hash) ^ str.charCodeAt(i);
+        return hash >>> 0;
+    }
+    function create_rule(node, a, b, duration, delay, ease, fn, uid = 0) {
+        const step = 16.666 / duration;
+        let keyframes = '{\n';
+        for (let p = 0; p <= 1; p += step) {
+            const t = a + (b - a) * ease(p);
+            keyframes += p * 100 + `%{${fn(t, 1 - t)}}\n`;
+        }
+        const rule = keyframes + `100% {${fn(b, 1 - b)}}\n}`;
+        const name = `__svelte_${hash(rule)}_${uid}`;
+        const doc = get_root_for_style(node);
+        active_docs.add(doc);
+        const stylesheet = doc.__svelte_stylesheet || (doc.__svelte_stylesheet = append_empty_stylesheet(node).sheet);
+        const current_rules = doc.__svelte_rules || (doc.__svelte_rules = {});
+        if (!current_rules[name]) {
+            current_rules[name] = true;
+            stylesheet.insertRule(`@keyframes ${name} ${rule}`, stylesheet.cssRules.length);
+        }
+        const animation = node.style.animation || '';
+        node.style.animation = `${animation ? `${animation}, ` : ''}${name} ${duration}ms linear ${delay}ms 1 both`;
+        active += 1;
+        return name;
+    }
+    function delete_rule(node, name) {
+        const previous = (node.style.animation || '').split(', ');
+        const next = previous.filter(name
+            ? anim => anim.indexOf(name) < 0 // remove specific animation
+            : anim => anim.indexOf('__svelte') === -1 // remove all Svelte animations
+        );
+        const deleted = previous.length - next.length;
+        if (deleted) {
+            node.style.animation = next.join(', ');
+            active -= deleted;
+            if (!active)
+                clear_rules();
+        }
+    }
+    function clear_rules() {
+        raf(() => {
+            if (active)
+                return;
+            active_docs.forEach(doc => {
+                const stylesheet = doc.__svelte_stylesheet;
+                let i = stylesheet.cssRules.length;
+                while (i--)
+                    stylesheet.deleteRule(i);
+                doc.__svelte_rules = {};
+            });
+            active_docs.clear();
+        });
+    }
+
     let current_component;
     function set_current_component(component) {
         current_component = component;
+    }
+    function get_current_component() {
+        if (!current_component)
+            throw new Error('Function called outside component initialization');
+        return current_component;
+    }
+    function onMount(fn) {
+        get_current_component().$$.on_mount.push(fn);
+    }
+    function onDestroy(fn) {
+        get_current_component().$$.on_destroy.push(fn);
     }
 
     const dirty_components = [];
@@ -100,7 +276,7 @@ var app = (function () {
                 const component = dirty_components[flushidx];
                 flushidx++;
                 set_current_component(component);
-                update$1(component.$$);
+                update(component.$$);
             }
             set_current_component(null);
             dirty_components.length = 0;
@@ -127,7 +303,7 @@ var app = (function () {
         seen_callbacks.clear();
         set_current_component(saved_component);
     }
-    function update$1($$) {
+    function update($$) {
         if ($$.fragment !== null) {
             $$.update();
             run_all($$.before_update);
@@ -137,12 +313,162 @@ var app = (function () {
             $$.after_update.forEach(add_render_callback);
         }
     }
+
+    let promise;
+    function wait() {
+        if (!promise) {
+            promise = Promise.resolve();
+            promise.then(() => {
+                promise = null;
+            });
+        }
+        return promise;
+    }
+    function dispatch(node, direction, kind) {
+        node.dispatchEvent(custom_event(`${direction ? 'intro' : 'outro'}${kind}`));
+    }
     const outroing = new Set();
+    let outros;
+    function group_outros() {
+        outros = {
+            r: 0,
+            c: [],
+            p: outros // parent group
+        };
+    }
+    function check_outros() {
+        if (!outros.r) {
+            run_all(outros.c);
+        }
+        outros = outros.p;
+    }
     function transition_in(block, local) {
         if (block && block.i) {
             outroing.delete(block);
             block.i(local);
         }
+    }
+    function transition_out(block, local, detach, callback) {
+        if (block && block.o) {
+            if (outroing.has(block))
+                return;
+            outroing.add(block);
+            outros.c.push(() => {
+                outroing.delete(block);
+                if (callback) {
+                    if (detach)
+                        block.d(1);
+                    callback();
+                }
+            });
+            block.o(local);
+        }
+    }
+    const null_transition = { duration: 0 };
+    function create_bidirectional_transition(node, fn, params, intro) {
+        let config = fn(node, params);
+        let t = intro ? 0 : 1;
+        let running_program = null;
+        let pending_program = null;
+        let animation_name = null;
+        function clear_animation() {
+            if (animation_name)
+                delete_rule(node, animation_name);
+        }
+        function init(program, duration) {
+            const d = (program.b - t);
+            duration *= Math.abs(d);
+            return {
+                a: t,
+                b: program.b,
+                d,
+                duration,
+                start: program.start,
+                end: program.start + duration,
+                group: program.group
+            };
+        }
+        function go(b) {
+            const { delay = 0, duration = 300, easing = identity, tick = noop, css } = config || null_transition;
+            const program = {
+                start: now() + delay,
+                b
+            };
+            if (!b) {
+                // @ts-ignore todo: improve typings
+                program.group = outros;
+                outros.r += 1;
+            }
+            if (running_program || pending_program) {
+                pending_program = program;
+            }
+            else {
+                // if this is an intro, and there's a delay, we need to do
+                // an initial tick and/or apply CSS animation immediately
+                if (css) {
+                    clear_animation();
+                    animation_name = create_rule(node, t, b, duration, delay, easing, css);
+                }
+                if (b)
+                    tick(0, 1);
+                running_program = init(program, duration);
+                add_render_callback(() => dispatch(node, b, 'start'));
+                loop(now => {
+                    if (pending_program && now > pending_program.start) {
+                        running_program = init(pending_program, duration);
+                        pending_program = null;
+                        dispatch(node, running_program.b, 'start');
+                        if (css) {
+                            clear_animation();
+                            animation_name = create_rule(node, t, running_program.b, running_program.duration, 0, easing, config.css);
+                        }
+                    }
+                    if (running_program) {
+                        if (now >= running_program.end) {
+                            tick(t = running_program.b, 1 - t);
+                            dispatch(node, running_program.b, 'end');
+                            if (!pending_program) {
+                                // we're done
+                                if (running_program.b) {
+                                    // intro — we can tidy up immediately
+                                    clear_animation();
+                                }
+                                else {
+                                    // outro — needs to be coordinated
+                                    if (!--running_program.group.r)
+                                        run_all(running_program.group.c);
+                                }
+                            }
+                            running_program = null;
+                        }
+                        else if (now >= running_program.start) {
+                            const p = now - running_program.start;
+                            t = running_program.a + running_program.d * easing(p / running_program.duration);
+                            tick(t, 1 - t);
+                        }
+                    }
+                    return !!(running_program || pending_program);
+                });
+            }
+        }
+        return {
+            run(b) {
+                if (is_function(config)) {
+                    wait().then(() => {
+                        // @ts-ignore
+                        config = config();
+                        go(b);
+                    });
+                }
+                else {
+                    go(b);
+                }
+            },
+            end() {
+                clear_animation();
+                running_program = pending_program = null;
+            }
+        };
     }
 
     const globals = (typeof window !== 'undefined'
@@ -150,6 +476,9 @@ var app = (function () {
         : typeof globalThis !== 'undefined'
             ? globalThis
             : global);
+    function create_component(block) {
+        block && block.c();
+    }
     function mount_component(component, target, anchor, customElement) {
         const { fragment, on_mount, on_destroy, after_update } = component.$$;
         fragment && fragment.m(target, anchor);
@@ -279,6 +608,10 @@ var app = (function () {
     function dispatch_dev(type, detail) {
         document.dispatchEvent(custom_event(type, Object.assign({ version: '3.44.3' }, detail), true));
     }
+    function append_dev(target, node) {
+        dispatch_dev('SvelteDOMInsert', { target, node });
+        append(target, node);
+    }
     function insert_dev(target, node, anchor) {
         dispatch_dev('SvelteDOMInsert', { target, node, anchor });
         insert(target, node, anchor);
@@ -287,12 +620,41 @@ var app = (function () {
         dispatch_dev('SvelteDOMRemove', { node });
         detach(node);
     }
+    function listen_dev(node, event, handler, options, has_prevent_default, has_stop_propagation) {
+        const modifiers = options === true ? ['capture'] : options ? Array.from(Object.keys(options)) : [];
+        if (has_prevent_default)
+            modifiers.push('preventDefault');
+        if (has_stop_propagation)
+            modifiers.push('stopPropagation');
+        dispatch_dev('SvelteDOMAddEventListener', { node, event, handler, modifiers });
+        const dispose = listen(node, event, handler, options);
+        return () => {
+            dispatch_dev('SvelteDOMRemoveEventListener', { node, event, handler, modifiers });
+            dispose();
+        };
+    }
     function attr_dev(node, attribute, value) {
         attr(node, attribute, value);
         if (value == null)
             dispatch_dev('SvelteDOMRemoveAttribute', { node, attribute });
         else
             dispatch_dev('SvelteDOMSetAttribute', { node, attribute, value });
+    }
+    function set_data_dev(text, data) {
+        data = '' + data;
+        if (text.wholeText === data)
+            return;
+        dispatch_dev('SvelteDOMSetData', { node: text, data });
+        text.data = data;
+    }
+    function validate_each_argument(arg) {
+        if (typeof arg !== 'string' && !(arg && typeof arg === 'object' && 'length' in arg)) {
+            let msg = '{#each} only iterates over array-like objects.';
+            if (typeof Symbol === 'function' && arg && Symbol.iterator in arg) {
+                msg += ' You can use a spread to convert this iterable into an array.';
+            }
+            throw new Error(msg);
+        }
     }
     function validate_slots(name, slot, keys) {
         for (const slot_key of Object.keys(slot)) {
@@ -320,6 +682,94 @@ var app = (function () {
         $capture_state() { }
         $inject_state() { }
     }
+
+    function cubicOut(t) {
+        const f = t - 1.0;
+        return f * f * f + 1.0;
+    }
+    function quintInOut(t) {
+        if ((t *= 2) < 1)
+            return 0.5 * t * t * t * t * t;
+        return 0.5 * ((t -= 2) * t * t * t * t + 2);
+    }
+
+    function slide(node, { delay = 0, duration = 400, easing = cubicOut } = {}) {
+        const style = getComputedStyle(node);
+        const opacity = +style.opacity;
+        const height = parseFloat(style.height);
+        const padding_top = parseFloat(style.paddingTop);
+        const padding_bottom = parseFloat(style.paddingBottom);
+        const margin_top = parseFloat(style.marginTop);
+        const margin_bottom = parseFloat(style.marginBottom);
+        const border_top_width = parseFloat(style.borderTopWidth);
+        const border_bottom_width = parseFloat(style.borderBottomWidth);
+        return {
+            delay,
+            duration,
+            easing,
+            css: t => 'overflow: hidden;' +
+                `opacity: ${Math.min(t * 20, 1) * opacity};` +
+                `height: ${t * height}px;` +
+                `padding-top: ${t * padding_top}px;` +
+                `padding-bottom: ${t * padding_bottom}px;` +
+                `margin-top: ${t * margin_top}px;` +
+                `margin-bottom: ${t * margin_bottom}px;` +
+                `border-top-width: ${t * border_top_width}px;` +
+                `border-bottom-width: ${t * border_bottom_width}px;`
+        };
+    }
+
+    const subscriber_queue = [];
+    /**
+     * Create a `Writable` store that allows both updating and reading by subscription.
+     * @param {*=}value initial value
+     * @param {StartStopNotifier=}start start and stop notifications for subscriptions
+     */
+    function writable(value, start = noop) {
+        let stop;
+        const subscribers = new Set();
+        function set(new_value) {
+            if (safe_not_equal(value, new_value)) {
+                value = new_value;
+                if (stop) { // store is ready
+                    const run_queue = !subscriber_queue.length;
+                    for (const subscriber of subscribers) {
+                        subscriber[1]();
+                        subscriber_queue.push(subscriber, value);
+                    }
+                    if (run_queue) {
+                        for (let i = 0; i < subscriber_queue.length; i += 2) {
+                            subscriber_queue[i][0](subscriber_queue[i + 1]);
+                        }
+                        subscriber_queue.length = 0;
+                    }
+                }
+            }
+        }
+        function update(fn) {
+            set(fn(value));
+        }
+        function subscribe(run, invalidate = noop) {
+            const subscriber = [run, invalidate];
+            subscribers.add(subscriber);
+            if (subscribers.size === 1) {
+                stop = start(set) || noop;
+            }
+            run(value);
+            return () => {
+                subscribers.delete(subscriber);
+                if (subscribers.size === 0) {
+                    stop();
+                    stop = null;
+                }
+            };
+        }
+        return { set, update, subscribe };
+    }
+
+    const pacmanName = writable("");
+    const pacmanId = writable("");
+    const globalState = writable(null);
 
     /**
      * @license
@@ -23603,7 +24053,7 @@ var app = (function () {
 
     ArrayCamera.prototype.isArrayCamera = true;
 
-    class Group$1 extends Object3D {
+    class Group extends Object3D {
 
     	constructor() {
 
@@ -23615,7 +24065,7 @@ var app = (function () {
 
     }
 
-    Group$1.prototype.isGroup = true;
+    Group.prototype.isGroup = true;
 
     const _moveEvent = { type: 'move' };
 
@@ -23633,7 +24083,7 @@ var app = (function () {
 
     		if ( this._hand === null ) {
 
-    			this._hand = new Group$1();
+    			this._hand = new Group();
     			this._hand.matrixAutoUpdate = false;
     			this._hand.visible = false;
 
@@ -23650,7 +24100,7 @@ var app = (function () {
 
     		if ( this._targetRay === null ) {
 
-    			this._targetRay = new Group$1();
+    			this._targetRay = new Group();
     			this._targetRay.matrixAutoUpdate = false;
     			this._targetRay.visible = false;
     			this._targetRay.hasLinearVelocity = false;
@@ -23668,7 +24118,7 @@ var app = (function () {
 
     		if ( this._grip === null ) {
 
-    			this._grip = new Group$1();
+    			this._grip = new Group();
     			this._grip.matrixAutoUpdate = false;
     			this._grip.visible = false;
     			this._grip.hasLinearVelocity = false;
@@ -23793,7 +24243,7 @@ var app = (function () {
     					if ( hand.joints[ inputjoint.jointName ] === undefined ) {
 
     						// The transform of this joint will be updated with the joint pose on each frame
-    						const joint = new Group$1();
+    						const joint = new Group();
     						joint.matrixAutoUpdate = false;
     						joint.visible = false;
     						hand.joints[ inputjoint.jointName ] = joint;
@@ -42570,6 +43020,12 @@ var app = (function () {
     }
 
     class Utils {
+        static genRandomId() {
+            return Math.random().toString(36).substring(2, 15) +
+                Math.random().toString(36).substring(2, 15) +
+                Math.random().toString(36).substring(2, 15) +
+                Math.random().toString(36).substring(2, 15);
+        }
     }
     Utils.UP = new Vector3(0, 0, 1);
     Utils.LEFT = new Vector3(-1, 0, 0);
@@ -42577,18 +43033,923 @@ var app = (function () {
     Utils.RIGHT = new Vector3(1, 0, 0);
     Utils.BOTTOM = new Vector3(0, -1, 0);
 
+    /* src\pages\Loading.svelte generated by Svelte v3.44.3 */
+
+    const file$1 = "src\\pages\\Loading.svelte";
+
+    function create_fragment$3(ctx) {
+    	let div2;
+    	let div0;
+    	let t;
+    	let div1;
+
+    	const block = {
+    		c: function create() {
+    			div2 = element("div");
+    			div0 = element("div");
+    			t = space();
+    			div1 = element("div");
+    			attr_dev(div0, "class", "pacman svelte-1rnv3hr");
+    			add_location(div0, file$1, 3, 4, 54);
+    			attr_dev(div1, "class", "dot svelte-1rnv3hr");
+    			add_location(div1, file$1, 4, 4, 82);
+    			attr_dev(div2, "class", "box svelte-1rnv3hr");
+    			add_location(div2, file$1, 2, 0, 31);
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div2, anchor);
+    			append_dev(div2, div0);
+    			append_dev(div2, t);
+    			append_dev(div2, div1);
+    		},
+    		p: noop,
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div2);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$3.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$3($$self, $$props) {
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots('Loading', slots, []);
+    	const writable_props = [];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<Loading> was created with unknown prop '${key}'`);
+    	});
+
+    	return [];
+    }
+
+    class Loading extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$3, create_fragment$3, safe_not_equal, {});
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Loading",
+    			options,
+    			id: create_fragment$3.name
+    		});
+    	}
+    }
+
+    /* src\pages\Menu.svelte generated by Svelte v3.44.3 */
+    const file = "src\\pages\\Menu.svelte";
+
+    function get_each_context(ctx, list, i) {
+    	const child_ctx = ctx.slice();
+    	child_ctx[20] = list[i];
+    	return child_ctx;
+    }
+
+    // (74:0) {#if !hideMenu}
+    function create_if_block$1(ctx) {
+    	let div;
+    	let img;
+    	let img_src_value;
+    	let t;
+    	let current_block_type_index;
+    	let if_block;
+    	let div_transition;
+    	let current;
+    	const if_block_creators = [create_if_block_1, create_if_block_2, create_if_block_3, create_else_block];
+    	const if_blocks = [];
+
+    	function select_block_type(ctx, dirty) {
+    		if (/*errorGameStarted*/ ctx[3]) return 0;
+    		if (/*insertName*/ ctx[1]) return 1;
+    		if (/*pressStart*/ ctx[2]) return 2;
+    		return 3;
+    	}
+
+    	current_block_type_index = select_block_type(ctx);
+    	if_block = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			img = element("img");
+    			t = space();
+    			if_block.c();
+    			if (!src_url_equal(img.src, img_src_value = "./img/pacman_logo.png")) attr_dev(img, "src", img_src_value);
+    			attr_dev(img, "alt", "pacman logo");
+    			attr_dev(img, "class", "svelte-1wb55tw");
+    			add_location(img, file, 75, 8, 2123);
+    			attr_dev(div, "class", "init svelte-1wb55tw");
+    			add_location(div, file, 74, 4, 2027);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			append_dev(div, img);
+    			append_dev(div, t);
+    			if_blocks[current_block_type_index].m(div, null);
+    			current = true;
+    		},
+    		p: function update(new_ctx, dirty) {
+    			ctx = new_ctx;
+    			let previous_block_index = current_block_type_index;
+    			current_block_type_index = select_block_type(ctx);
+
+    			if (current_block_type_index === previous_block_index) {
+    				if_blocks[current_block_type_index].p(ctx, dirty);
+    			} else {
+    				group_outros();
+
+    				transition_out(if_blocks[previous_block_index], 1, 1, () => {
+    					if_blocks[previous_block_index] = null;
+    				});
+
+    				check_outros();
+    				if_block = if_blocks[current_block_type_index];
+
+    				if (!if_block) {
+    					if_block = if_blocks[current_block_type_index] = if_block_creators[current_block_type_index](ctx);
+    					if_block.c();
+    				} else {
+    					if_block.p(ctx, dirty);
+    				}
+
+    				transition_in(if_block, 1);
+    				if_block.m(div, null);
+    			}
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(if_block);
+
+    			add_render_callback(() => {
+    				if (!div_transition) div_transition = create_bidirectional_transition(
+    					div,
+    					slide,
+    					{
+    						delay: 200,
+    						duration: 600,
+    						easing: quintInOut
+    					},
+    					true
+    				);
+
+    				div_transition.run(1);
+    			});
+
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(if_block);
+
+    			if (!div_transition) div_transition = create_bidirectional_transition(
+    				div,
+    				slide,
+    				{
+    					delay: 200,
+    					duration: 600,
+    					easing: quintInOut
+    				},
+    				false
+    			);
+
+    			div_transition.run(0);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			if_blocks[current_block_type_index].d();
+    			if (detaching && div_transition) div_transition.end();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block$1.name,
+    		type: "if",
+    		source: "(74:0) {#if !hideMenu}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (100:8) {:else}
+    function create_else_block(ctx) {
+    	let div;
+    	let t0;
+    	let h1;
+    	let t2;
+    	let loading;
+    	let current;
+    	loading = new Loading({ $$inline: true });
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			t0 = space();
+    			h1 = element("h1");
+    			h1.textContent = "Waiting other players";
+    			t2 = space();
+    			create_component(loading.$$.fragment);
+    			set_style(div, "height", "50px");
+    			add_location(div, file, 100, 12, 3210);
+    			attr_dev(h1, "class", "svelte-1wb55tw");
+    			add_location(h1, file, 101, 12, 3251);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, h1, anchor);
+    			insert_dev(target, t2, anchor);
+    			mount_component(loading, target, anchor);
+    			current = true;
+    		},
+    		p: noop,
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(loading.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(loading.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(h1);
+    			if (detaching) detach_dev(t2);
+    			destroy_component(loading, detaching);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_else_block.name,
+    		type: "else",
+    		source: "(100:8) {:else}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (89:29) 
+    function create_if_block_3(ctx) {
+    	let button;
+    	let t1;
+    	let h1;
+    	let t3;
+    	let div;
+    	let mounted;
+    	let dispose;
+    	let each_value = /*pacmanList*/ ctx[5];
+    	validate_each_argument(each_value);
+    	let each_blocks = [];
+
+    	for (let i = 0; i < each_value.length; i += 1) {
+    		each_blocks[i] = create_each_block(get_each_context(ctx, each_value, i));
+    	}
+
+    	const block = {
+    		c: function create() {
+    			button = element("button");
+    			button.textContent = "Start game";
+    			t1 = space();
+    			h1 = element("h1");
+    			h1.textContent = "Players";
+    			t3 = space();
+    			div = element("div");
+
+    			for (let i = 0; i < each_blocks.length; i += 1) {
+    				each_blocks[i].c();
+    			}
+
+    			attr_dev(button, "class", "game-start svelte-1wb55tw");
+    			add_location(button, file, 89, 12, 2766);
+    			attr_dev(h1, "class", "svelte-1wb55tw");
+    			add_location(h1, file, 90, 12, 2855);
+    			attr_dev(div, "class", "pacman-list svelte-1wb55tw");
+    			add_location(div, file, 91, 12, 2885);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, button, anchor);
+    			insert_dev(target, t1, anchor);
+    			insert_dev(target, h1, anchor);
+    			insert_dev(target, t3, anchor);
+    			insert_dev(target, div, anchor);
+
+    			for (let i = 0; i < each_blocks.length; i += 1) {
+    				each_blocks[i].m(div, null);
+    			}
+
+    			if (!mounted) {
+    				dispose = listen_dev(button, "click", /*click_handler*/ ctx[12], false, false, false);
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, dirty) {
+    			if (dirty & /*$pacmanId, pacmanList*/ 96) {
+    				each_value = /*pacmanList*/ ctx[5];
+    				validate_each_argument(each_value);
+    				let i;
+
+    				for (i = 0; i < each_value.length; i += 1) {
+    					const child_ctx = get_each_context(ctx, each_value, i);
+
+    					if (each_blocks[i]) {
+    						each_blocks[i].p(child_ctx, dirty);
+    					} else {
+    						each_blocks[i] = create_each_block(child_ctx);
+    						each_blocks[i].c();
+    						each_blocks[i].m(div, null);
+    					}
+    				}
+
+    				for (; i < each_blocks.length; i += 1) {
+    					each_blocks[i].d(1);
+    				}
+
+    				each_blocks.length = each_value.length;
+    			}
+    		},
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(button);
+    			if (detaching) detach_dev(t1);
+    			if (detaching) detach_dev(h1);
+    			if (detaching) detach_dev(t3);
+    			if (detaching) detach_dev(div);
+    			destroy_each(each_blocks, detaching);
+    			mounted = false;
+    			dispose();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_3.name,
+    		type: "if",
+    		source: "(89:29) ",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (81:29) 
+    function create_if_block_2(ctx) {
+    	let div0;
+    	let t0;
+    	let h1;
+    	let t2;
+    	let form;
+    	let input;
+    	let t3;
+    	let div1;
+    	let t4;
+    	let button;
+    	let mounted;
+    	let dispose;
+
+    	const block = {
+    		c: function create() {
+    			div0 = element("div");
+    			t0 = space();
+    			h1 = element("h1");
+    			h1.textContent = "Insert your nickname";
+    			t2 = space();
+    			form = element("form");
+    			input = element("input");
+    			t3 = space();
+    			div1 = element("div");
+    			t4 = space();
+    			button = element("button");
+    			button.textContent = "Go";
+    			set_style(div0, "height", "40px");
+    			add_location(div0, file, 81, 12, 2374);
+    			attr_dev(h1, "class", "svelte-1wb55tw");
+    			add_location(h1, file, 82, 12, 2415);
+    			attr_dev(input, "type", "text");
+    			attr_dev(input, "maxlength", "10");
+    			attr_dev(input, "minlength", "2");
+    			attr_dev(input, "class", "svelte-1wb55tw");
+    			add_location(input, file, 84, 16, 2531);
+    			set_style(div1, "width", "10px");
+    			add_location(div1, file, 85, 16, 2617);
+    			attr_dev(button, "class", "game-start svelte-1wb55tw");
+    			add_location(button, file, 86, 16, 2661);
+    			attr_dev(form, "class", "nick-insert svelte-1wb55tw");
+    			add_location(form, file, 83, 12, 2458);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div0, anchor);
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, h1, anchor);
+    			insert_dev(target, t2, anchor);
+    			insert_dev(target, form, anchor);
+    			append_dev(form, input);
+    			set_input_value(input, /*pName*/ ctx[4]);
+    			append_dev(form, t3);
+    			append_dev(form, div1);
+    			append_dev(form, t4);
+    			append_dev(form, button);
+
+    			if (!mounted) {
+    				dispose = [
+    					listen_dev(input, "input", /*input_input_handler*/ ctx[11]),
+    					listen_dev(form, "submit", /*handleSubmitName*/ ctx[7], false, false, false)
+    				];
+
+    				mounted = true;
+    			}
+    		},
+    		p: function update(ctx, dirty) {
+    			if (dirty & /*pName*/ 16 && input.value !== /*pName*/ ctx[4]) {
+    				set_input_value(input, /*pName*/ ctx[4]);
+    			}
+    		},
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div0);
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(h1);
+    			if (detaching) detach_dev(t2);
+    			if (detaching) detach_dev(form);
+    			mounted = false;
+    			run_all(dispose);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_2.name,
+    		type: "if",
+    		source: "(81:29) ",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (77:8) {#if errorGameStarted}
+    function create_if_block_1(ctx) {
+    	let div;
+    	let t0;
+    	let h1;
+    	let t2;
+    	let h3;
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			t0 = space();
+    			h1 = element("h1");
+    			h1.textContent = "Game already started";
+    			t2 = space();
+    			h3 = element("h3");
+    			h3.textContent = "Try another time";
+    			set_style(div, "height", "50px");
+    			add_location(div, file, 77, 12, 2220);
+    			attr_dev(h1, "class", "svelte-1wb55tw");
+    			add_location(h1, file, 78, 12, 2261);
+    			add_location(h3, file, 79, 12, 2304);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, h1, anchor);
+    			insert_dev(target, t2, anchor);
+    			insert_dev(target, h3, anchor);
+    		},
+    		p: noop,
+    		i: noop,
+    		o: noop,
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(h1);
+    			if (detaching) detach_dev(t2);
+    			if (detaching) detach_dev(h3);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_1.name,
+    		type: "if",
+    		source: "(77:8) {#if errorGameStarted}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (96:24) {#if $pacmanId == pacman.id}
+    function create_if_block_4(ctx) {
+    	let t;
+
+    	const block = {
+    		c: function create() {
+    			t = text("(YOU)");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, t, anchor);
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(t);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_4.name,
+    		type: "if",
+    		source: "(96:24) {#if $pacmanId == pacman.id}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (93:16) {#each pacmanList as pacman}
+    function create_each_block(ctx) {
+    	let div;
+    	let t0_value = /*pacman*/ ctx[20].name + "";
+    	let t0;
+    	let t1;
+    	let t2;
+    	let if_block = /*$pacmanId*/ ctx[6] == /*pacman*/ ctx[20].id && create_if_block_4(ctx);
+
+    	const block = {
+    		c: function create() {
+    			div = element("div");
+    			t0 = text(t0_value);
+    			t1 = space();
+    			if (if_block) if_block.c();
+    			t2 = space();
+    			attr_dev(div, "class", "pacman-name svelte-1wb55tw");
+    			add_location(div, file, 93, 20, 2978);
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, div, anchor);
+    			append_dev(div, t0);
+    			append_dev(div, t1);
+    			if (if_block) if_block.m(div, null);
+    			append_dev(div, t2);
+    		},
+    		p: function update(ctx, dirty) {
+    			if (dirty & /*pacmanList*/ 32 && t0_value !== (t0_value = /*pacman*/ ctx[20].name + "")) set_data_dev(t0, t0_value);
+
+    			if (/*$pacmanId*/ ctx[6] == /*pacman*/ ctx[20].id) {
+    				if (if_block) ; else {
+    					if_block = create_if_block_4(ctx);
+    					if_block.c();
+    					if_block.m(div, t2);
+    				}
+    			} else if (if_block) {
+    				if_block.d(1);
+    				if_block = null;
+    			}
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div);
+    			if (if_block) if_block.d();
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_each_block.name,
+    		type: "each",
+    		source: "(93:16) {#each pacmanList as pacman}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function create_fragment$2(ctx) {
+    	let if_block_anchor;
+    	let current;
+    	let if_block = !/*hideMenu*/ ctx[0] && create_if_block$1(ctx);
+
+    	const block = {
+    		c: function create() {
+    			if (if_block) if_block.c();
+    			if_block_anchor = empty();
+    		},
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: function mount(target, anchor) {
+    			if (if_block) if_block.m(target, anchor);
+    			insert_dev(target, if_block_anchor, anchor);
+    			current = true;
+    		},
+    		p: function update(ctx, [dirty]) {
+    			if (!/*hideMenu*/ ctx[0]) {
+    				if (if_block) {
+    					if_block.p(ctx, dirty);
+
+    					if (dirty & /*hideMenu*/ 1) {
+    						transition_in(if_block, 1);
+    					}
+    				} else {
+    					if_block = create_if_block$1(ctx);
+    					if_block.c();
+    					transition_in(if_block, 1);
+    					if_block.m(if_block_anchor.parentNode, if_block_anchor);
+    				}
+    			} else if (if_block) {
+    				group_outros();
+
+    				transition_out(if_block, 1, 1, () => {
+    					if_block = null;
+    				});
+
+    				check_outros();
+    			}
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(if_block);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(if_block);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			if (if_block) if_block.d(detaching);
+    			if (detaching) detach_dev(if_block_anchor);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$2.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$2($$self, $$props, $$invalidate) {
+    	let $globalState;
+    	let $pacmanId;
+    	validate_store(globalState, 'globalState');
+    	component_subscribe($$self, globalState, $$value => $$invalidate(15, $globalState = $$value));
+    	validate_store(pacmanId, 'pacmanId');
+    	component_subscribe($$self, pacmanId, $$value => $$invalidate(6, $pacmanId = $$value));
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots('Menu', slots, []);
+    	let { ydoc } = $$props;
+    	let { provider } = $$props;
+
+    	// States
+    	// Show game screen if all other players are ready
+    	let hideMenu = false;
+
+    	let insertName = true;
+    	let pressStart = false;
+    	let errorGameStarted = false;
+    	let pName;
+    	let pacmanList = new Array();
+
+    	// Update game state
+    	let gameState = ydoc.getMap('game_state');
+
+    	let gameStarted = false;
+
+    	gameState.observeDeep(() => {
+    		let value = gameState.get("game_started");
+
+    		// control if not null and not false
+    		if (value) {
+    			gameStarted = value;
+
+    			if (gameStarted && insertName) {
+    				closeConnection();
+    			}
+    		}
+    	});
+
+    	function closeConnection() {
+    		$$invalidate(3, errorGameStarted = true);
+    		provider.disconnect();
+    	}
+
+    	function handleSubmitName(e) {
+    		e.preventDefault();
+
+    		if (!gameStarted) {
+    			updatePacmanList();
+    			pacmanName.set(pName);
+    			pacmanId.set(Utils.genRandomId());
+    			$$invalidate(1, insertName = false);
+    			$$invalidate(2, pressStart = true);
+    		} else {
+    			closeConnection();
+    		}
+    	}
+
+    	let interval;
+
+    	function updatePacmanList() {
+    		interval = setInterval(
+    			() => {
+    				if ($globalState != null) {
+    					$$invalidate(5, pacmanList = Array.from($globalState.getPacmans()));
+    					$$invalidate(5, pacmanList); // for svelte reactivity
+    				}
+    			},
+    			200
+    		);
+    	}
+
+    	function startGame() {
+    		clearInterval(interval);
+    		gameState.set("game_started", true);
+    		$globalState.setCurrentPacmanPlaying(true);
+    		$$invalidate(2, pressStart = false);
+    		isAllready();
+    	}
+
+    	function isAllready() {
+    		interval = setInterval(
+    			() => {
+    				if ($globalState != null) {
+    					$$invalidate(0, hideMenu = $globalState.checkIfAllPlaying());
+
+    					if (hideMenu) {
+    						clearInterval(interval);
+    					}
+    				}
+    			},
+    			100
+    		);
+    	}
+
+    	const writable_props = ['ydoc', 'provider'];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console.warn(`<Menu> was created with unknown prop '${key}'`);
+    	});
+
+    	function input_input_handler() {
+    		pName = this.value;
+    		$$invalidate(4, pName);
+    	}
+
+    	const click_handler = () => {
+    		startGame();
+    	};
+
+    	$$self.$$set = $$props => {
+    		if ('ydoc' in $$props) $$invalidate(9, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(10, provider = $$props.provider);
+    	};
+
+    	$$self.$capture_state = () => ({
+    		slide,
+    		quintInOut,
+    		pacmanName,
+    		pacmanId,
+    		globalState,
+    		Utils,
+    		Loading,
+    		ydoc,
+    		provider,
+    		hideMenu,
+    		insertName,
+    		pressStart,
+    		errorGameStarted,
+    		pName,
+    		pacmanList,
+    		gameState,
+    		gameStarted,
+    		closeConnection,
+    		handleSubmitName,
+    		interval,
+    		updatePacmanList,
+    		startGame,
+    		isAllready,
+    		$globalState,
+    		$pacmanId
+    	});
+
+    	$$self.$inject_state = $$props => {
+    		if ('ydoc' in $$props) $$invalidate(9, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(10, provider = $$props.provider);
+    		if ('hideMenu' in $$props) $$invalidate(0, hideMenu = $$props.hideMenu);
+    		if ('insertName' in $$props) $$invalidate(1, insertName = $$props.insertName);
+    		if ('pressStart' in $$props) $$invalidate(2, pressStart = $$props.pressStart);
+    		if ('errorGameStarted' in $$props) $$invalidate(3, errorGameStarted = $$props.errorGameStarted);
+    		if ('pName' in $$props) $$invalidate(4, pName = $$props.pName);
+    		if ('pacmanList' in $$props) $$invalidate(5, pacmanList = $$props.pacmanList);
+    		if ('gameState' in $$props) gameState = $$props.gameState;
+    		if ('gameStarted' in $$props) gameStarted = $$props.gameStarted;
+    		if ('interval' in $$props) interval = $$props.interval;
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [
+    		hideMenu,
+    		insertName,
+    		pressStart,
+    		errorGameStarted,
+    		pName,
+    		pacmanList,
+    		$pacmanId,
+    		handleSubmitName,
+    		startGame,
+    		ydoc,
+    		provider,
+    		input_input_handler,
+    		click_handler
+    	];
+    }
+
+    class Menu extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$2, create_fragment$2, safe_not_equal, { ydoc: 9, provider: 10 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Menu",
+    			options,
+    			id: create_fragment$2.name
+    		});
+
+    		const { ctx } = this.$$;
+    		const props = options.props || {};
+
+    		if (/*ydoc*/ ctx[9] === undefined && !('ydoc' in props)) {
+    			console.warn("<Menu> was created without expected prop 'ydoc'");
+    		}
+
+    		if (/*provider*/ ctx[10] === undefined && !('provider' in props)) {
+    			console.warn("<Menu> was created without expected prop 'provider'");
+    		}
+    	}
+
+    	get ydoc() {
+    		throw new Error("<Menu>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set ydoc(value) {
+    		throw new Error("<Menu>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get provider() {
+    		throw new Error("<Menu>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set provider(value) {
+    		throw new Error("<Menu>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
+
     class Camera {
-        constructor() {
+        constructor(renderer, pacman) {
+            this.pacman = pacman;
             this.camera = new PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000);
-            this.camera.up.copy(Utils.UP);
-            this.targetPosition = new Vector3();
-            this.targetLookAt = new Vector3();
-            this.lookAtPosition = new Vector3();
+            this.camera.up = (new Vector3()).copy(Utils.UP);
+            this.targetPosition = (new Vector3()).copy(pacman.getPosition()).addScaledVector(Utils.UP, 5).addScaledVector(pacman.direction, -3);
+            this.targetLookAt = (new Vector3()).copy(pacman.getPosition()).add(pacman.direction);
+            this.lookAtPosition = (new Vector3()).copy(this.targetLookAt);
+            window.onresize = () => {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            };
         }
-        updateCamera(delta, pacman) {
+        updateCamera(delta) {
             // Place camera above and behind pacman, looking towards direction of pacman.
-            this.targetPosition.copy(pacman.getPosition()).addScaledVector(Utils.UP, 5).addScaledVector(pacman.direction, -3);
-            this.targetLookAt.copy(pacman.getPosition()).add(pacman.direction);
+            this.targetPosition.copy(this.pacman.getPosition()).addScaledVector(Utils.UP, 5).addScaledVector(this.pacman.direction, -3);
+            this.targetLookAt.copy(this.pacman.getPosition()).add(this.pacman.direction);
             // Move camera slowly during win/lose animations.
             //let cameraSpeed = (lost || won) ? 1 : 10
             let cameraSpeed = 1;
@@ -43795,6 +45156,19 @@ var app = (function () {
         write(encoder, /** @type {number} */ (encodedString.codePointAt(i)));
       }
     };
+
+    /**
+     * Write the content of another Encoder.
+     *
+     * @TODO: can be improved!
+     *        - Note: Should consider that when appending a lot of small Encoders, we should rather clone than referencing the old structure.
+     *                Encoders start with a rather big initial buffer.
+     *
+     * @function
+     * @param {Encoder} encoder The enUint8Arr
+     * @param {Encoder} append The BinaryEncoder to be written.
+     */
+    const writeBinaryEncoder = (encoder, append) => writeUint8Array(encoder, toUint8Array(append));
 
     /**
      * Append fixed-length Uint8Array to the encoder.
@@ -46345,6 +47719,19 @@ var app = (function () {
       }, transactionOrigin, false);
 
     /**
+     * Read and apply a document update.
+     *
+     * This function has the same effect as `applyUpdate` but accepts an decoder.
+     *
+     * @param {decoding.Decoder} decoder
+     * @param {Doc} ydoc
+     * @param {any} [transactionOrigin] This will be stored on `transaction.origin` and `.on('update', (update, origin))`
+     *
+     * @function
+     */
+    const readUpdate$1 = (decoder, ydoc, transactionOrigin) => readUpdateV2(decoder, ydoc, transactionOrigin, new UpdateDecoderV1(decoder));
+
+    /**
      * Apply a document update created by, for example, `y.on('update', update => ..)` or `update = encodeStateAsUpdate()`.
      *
      * This function has the same effect as `readUpdate` but accepts an Uint8Array instead of a Decoder.
@@ -46638,6 +48025,32 @@ var app = (function () {
     const createID = (client, clock) => new ID(client, clock);
 
     /**
+     * @param {encoding.Encoder} encoder
+     * @param {ID} id
+     *
+     * @private
+     * @function
+     */
+    const writeID = (encoder, id) => {
+      writeVarUint(encoder, id.client);
+      writeVarUint(encoder, id.clock);
+    };
+
+    /**
+     * Read ID.
+     * * If first varUint read is 0xFFFFFF a RootID is returned.
+     * * Otherwise an ID is returned
+     *
+     * @param {decoding.Decoder} decoder
+     * @return {ID}
+     *
+     * @private
+     * @function
+     */
+    const readID = decoder =>
+      createID(readVarUint(decoder), readVarUint(decoder));
+
+    /**
      * The top types are mapped from y.share.get(keyname) => type.
      * `type` does not store any information about the `keyname`.
      * This function finds the correct `keyname` for `type` and throws otherwise.
@@ -46678,6 +48091,466 @@ var app = (function () {
       return false
     };
 
+    /**
+     * Convenient helper to log type information.
+     *
+     * Do not use in productive systems as the output can be immense!
+     *
+     * @param {AbstractType<any>} type
+     */
+    const logType = type => {
+      const res = [];
+      let n = type._start;
+      while (n) {
+        res.push(n);
+        n = n.right;
+      }
+      console.log('Children: ', res);
+      console.log('Children content: ', res.filter(m => !m.deleted).map(m => m.content));
+    };
+
+    class PermanentUserData {
+      /**
+       * @param {Doc} doc
+       * @param {YMap<any>} [storeType]
+       */
+      constructor (doc, storeType = doc.getMap('users')) {
+        /**
+         * @type {Map<string,DeleteSet>}
+         */
+        const dss = new Map();
+        this.yusers = storeType;
+        this.doc = doc;
+        /**
+         * Maps from clientid to userDescription
+         *
+         * @type {Map<number,string>}
+         */
+        this.clients = new Map();
+        this.dss = dss;
+        /**
+         * @param {YMap<any>} user
+         * @param {string} userDescription
+         */
+        const initUser = (user, userDescription) => {
+          /**
+           * @type {YArray<Uint8Array>}
+           */
+          const ds = user.get('ds');
+          const ids = user.get('ids');
+          const addClientId = /** @param {number} clientid */ clientid => this.clients.set(clientid, userDescription);
+          ds.observe(/** @param {YArrayEvent<any>} event */ event => {
+            event.changes.added.forEach(item => {
+              item.content.getContent().forEach(encodedDs => {
+                if (encodedDs instanceof Uint8Array) {
+                  this.dss.set(userDescription, mergeDeleteSets([this.dss.get(userDescription) || createDeleteSet(), readDeleteSet(new DSDecoderV1(createDecoder(encodedDs)))]));
+                }
+              });
+            });
+          });
+          this.dss.set(userDescription, mergeDeleteSets(ds.map(encodedDs => readDeleteSet(new DSDecoderV1(createDecoder(encodedDs))))));
+          ids.observe(/** @param {YArrayEvent<any>} event */ event =>
+            event.changes.added.forEach(item => item.content.getContent().forEach(addClientId))
+          );
+          ids.forEach(addClientId);
+        };
+        // observe users
+        storeType.observe(event => {
+          event.keysChanged.forEach(userDescription =>
+            initUser(storeType.get(userDescription), userDescription)
+          );
+        });
+        // add intial data
+        storeType.forEach(initUser);
+      }
+
+      /**
+       * @param {Doc} doc
+       * @param {number} clientid
+       * @param {string} userDescription
+       * @param {Object} [conf]
+       * @param {function(Transaction, DeleteSet):boolean} [conf.filter]
+       */
+      setUserMapping (doc, clientid, userDescription, { filter = () => true } = {}) {
+        const users = this.yusers;
+        let user = users.get(userDescription);
+        if (!user) {
+          user = new YMap();
+          user.set('ids', new YArray());
+          user.set('ds', new YArray());
+          users.set(userDescription, user);
+        }
+        user.get('ids').push([clientid]);
+        users.observe(event => {
+          setTimeout(() => {
+            const userOverwrite = users.get(userDescription);
+            if (userOverwrite !== user) {
+              // user was overwritten, port all data over to the next user object
+              // @todo Experiment with Y.Sets here
+              user = userOverwrite;
+              // @todo iterate over old type
+              this.clients.forEach((_userDescription, clientid) => {
+                if (userDescription === _userDescription) {
+                  user.get('ids').push([clientid]);
+                }
+              });
+              const encoder = new DSEncoderV1();
+              const ds = this.dss.get(userDescription);
+              if (ds) {
+                writeDeleteSet(encoder, ds);
+                user.get('ds').push([encoder.toUint8Array()]);
+              }
+            }
+          }, 0);
+        });
+        doc.on('afterTransaction', /** @param {Transaction} transaction */ transaction => {
+          setTimeout(() => {
+            const yds = user.get('ds');
+            const ds = transaction.deleteSet;
+            if (transaction.local && ds.clients.size > 0 && filter(transaction, ds)) {
+              const encoder = new DSEncoderV1();
+              writeDeleteSet(encoder, ds);
+              yds.push([encoder.toUint8Array()]);
+            }
+          });
+        });
+      }
+
+      /**
+       * @param {number} clientid
+       * @return {any}
+       */
+      getUserByClientId (clientid) {
+        return this.clients.get(clientid) || null
+      }
+
+      /**
+       * @param {ID} id
+       * @return {string | null}
+       */
+      getUserByDeletedId (id) {
+        for (const [userDescription, ds] of this.dss.entries()) {
+          if (isDeleted(ds, id)) {
+            return userDescription
+          }
+        }
+        return null
+      }
+    }
+
+    /**
+     * A relative position is based on the Yjs model and is not affected by document changes.
+     * E.g. If you place a relative position before a certain character, it will always point to this character.
+     * If you place a relative position at the end of a type, it will always point to the end of the type.
+     *
+     * A numeric position is often unsuited for user selections, because it does not change when content is inserted
+     * before or after.
+     *
+     * ```Insert(0, 'x')('a|bc') = 'xa|bc'``` Where | is the relative position.
+     *
+     * One of the properties must be defined.
+     *
+     * @example
+     *   // Current cursor position is at position 10
+     *   const relativePosition = createRelativePositionFromIndex(yText, 10)
+     *   // modify yText
+     *   yText.insert(0, 'abc')
+     *   yText.delete(3, 10)
+     *   // Compute the cursor position
+     *   const absolutePosition = createAbsolutePositionFromRelativePosition(y, relativePosition)
+     *   absolutePosition.type === yText // => true
+     *   console.log('cursor location is ' + absolutePosition.index) // => cursor location is 3
+     *
+     */
+    class RelativePosition {
+      /**
+       * @param {ID|null} type
+       * @param {string|null} tname
+       * @param {ID|null} item
+       * @param {number} assoc
+       */
+      constructor (type, tname, item, assoc = 0) {
+        /**
+         * @type {ID|null}
+         */
+        this.type = type;
+        /**
+         * @type {string|null}
+         */
+        this.tname = tname;
+        /**
+         * @type {ID | null}
+         */
+        this.item = item;
+        /**
+         * A relative position is associated to a specific character. By default
+         * assoc >= 0, the relative position is associated to the character
+         * after the meant position.
+         * I.e. position 1 in 'ab' is associated to character 'b'.
+         *
+         * If assoc < 0, then the relative position is associated to the caharacter
+         * before the meant position.
+         *
+         * @type {number}
+         */
+        this.assoc = assoc;
+      }
+    }
+
+    /**
+     * @param {RelativePosition} rpos
+     * @return {any}
+     */
+    const relativePositionToJSON = rpos => {
+      const json = {};
+      if (rpos.type) {
+        json.type = rpos.type;
+      }
+      if (rpos.tname) {
+        json.tname = rpos.tname;
+      }
+      if (rpos.item) {
+        json.item = rpos.item;
+      }
+      if (rpos.assoc != null) {
+        json.assoc = rpos.assoc;
+      }
+      return json
+    };
+
+    /**
+     * @param {any} json
+     * @return {RelativePosition}
+     *
+     * @function
+     */
+    const createRelativePositionFromJSON = json => new RelativePosition(json.type == null ? null : createID(json.type.client, json.type.clock), json.tname || null, json.item == null ? null : createID(json.item.client, json.item.clock), json.assoc == null ? 0 : json.assoc);
+
+    class AbsolutePosition {
+      /**
+       * @param {AbstractType<any>} type
+       * @param {number} index
+       * @param {number} [assoc]
+       */
+      constructor (type, index, assoc = 0) {
+        /**
+         * @type {AbstractType<any>}
+         */
+        this.type = type;
+        /**
+         * @type {number}
+         */
+        this.index = index;
+        this.assoc = assoc;
+      }
+    }
+
+    /**
+     * @param {AbstractType<any>} type
+     * @param {number} index
+     * @param {number} [assoc]
+     *
+     * @function
+     */
+    const createAbsolutePosition = (type, index, assoc = 0) => new AbsolutePosition(type, index, assoc);
+
+    /**
+     * @param {AbstractType<any>} type
+     * @param {ID|null} item
+     * @param {number} [assoc]
+     *
+     * @function
+     */
+    const createRelativePosition = (type, item, assoc) => {
+      let typeid = null;
+      let tname = null;
+      if (type._item === null) {
+        tname = findRootTypeKey(type);
+      } else {
+        typeid = createID(type._item.id.client, type._item.id.clock);
+      }
+      return new RelativePosition(typeid, tname, item, assoc)
+    };
+
+    /**
+     * Create a relativePosition based on a absolute position.
+     *
+     * @param {AbstractType<any>} type The base type (e.g. YText or YArray).
+     * @param {number} index The absolute position.
+     * @param {number} [assoc]
+     * @return {RelativePosition}
+     *
+     * @function
+     */
+    const createRelativePositionFromTypeIndex = (type, index, assoc = 0) => {
+      let t = type._start;
+      if (assoc < 0) {
+        // associated to the left character or the beginning of a type, increment index if possible.
+        if (index === 0) {
+          return createRelativePosition(type, null, assoc)
+        }
+        index--;
+      }
+      while (t !== null) {
+        if (!t.deleted && t.countable) {
+          if (t.length > index) {
+            // case 1: found position somewhere in the linked list
+            return createRelativePosition(type, createID(t.id.client, t.id.clock + index), assoc)
+          }
+          index -= t.length;
+        }
+        if (t.right === null && assoc < 0) {
+          // left-associated position, return last available id
+          return createRelativePosition(type, t.lastId, assoc)
+        }
+        t = t.right;
+      }
+      return createRelativePosition(type, null, assoc)
+    };
+
+    /**
+     * @param {encoding.Encoder} encoder
+     * @param {RelativePosition} rpos
+     *
+     * @function
+     */
+    const writeRelativePosition = (encoder, rpos) => {
+      const { type, tname, item, assoc } = rpos;
+      if (item !== null) {
+        writeVarUint(encoder, 0);
+        writeID(encoder, item);
+      } else if (tname !== null) {
+        // case 2: found position at the end of the list and type is stored in y.share
+        writeUint8(encoder, 1);
+        writeVarString(encoder, tname);
+      } else if (type !== null) {
+        // case 3: found position at the end of the list and type is attached to an item
+        writeUint8(encoder, 2);
+        writeID(encoder, type);
+      } else {
+        throw unexpectedCase()
+      }
+      writeVarInt(encoder, assoc);
+      return encoder
+    };
+
+    /**
+     * @param {RelativePosition} rpos
+     * @return {Uint8Array}
+     */
+    const encodeRelativePosition = rpos => {
+      const encoder = createEncoder();
+      writeRelativePosition(encoder, rpos);
+      return toUint8Array(encoder)
+    };
+
+    /**
+     * @param {decoding.Decoder} decoder
+     * @return {RelativePosition}
+     *
+     * @function
+     */
+    const readRelativePosition = decoder => {
+      let type = null;
+      let tname = null;
+      let itemID = null;
+      switch (readVarUint(decoder)) {
+        case 0:
+          // case 1: found position somewhere in the linked list
+          itemID = readID(decoder);
+          break
+        case 1:
+          // case 2: found position at the end of the list and type is stored in y.share
+          tname = readVarString(decoder);
+          break
+        case 2: {
+          // case 3: found position at the end of the list and type is attached to an item
+          type = readID(decoder);
+        }
+      }
+      const assoc = hasContent(decoder) ? readVarInt(decoder) : 0;
+      return new RelativePosition(type, tname, itemID, assoc)
+    };
+
+    /**
+     * @param {Uint8Array} uint8Array
+     * @return {RelativePosition}
+     */
+    const decodeRelativePosition = uint8Array => readRelativePosition(createDecoder(uint8Array));
+
+    /**
+     * @param {RelativePosition} rpos
+     * @param {Doc} doc
+     * @return {AbsolutePosition|null}
+     *
+     * @function
+     */
+    const createAbsolutePositionFromRelativePosition = (rpos, doc) => {
+      const store = doc.store;
+      const rightID = rpos.item;
+      const typeID = rpos.type;
+      const tname = rpos.tname;
+      const assoc = rpos.assoc;
+      let type = null;
+      let index = 0;
+      if (rightID !== null) {
+        if (getState(store, rightID.client) <= rightID.clock) {
+          return null
+        }
+        const res = followRedone(store, rightID);
+        const right = res.item;
+        if (!(right instanceof Item)) {
+          return null
+        }
+        type = /** @type {AbstractType<any>} */ (right.parent);
+        if (type._item === null || !type._item.deleted) {
+          index = (right.deleted || !right.countable) ? 0 : (res.diff + (assoc >= 0 ? 0 : 1)); // adjust position based on left association if necessary
+          let n = right.left;
+          while (n !== null) {
+            if (!n.deleted && n.countable) {
+              index += n.length;
+            }
+            n = n.left;
+          }
+        }
+      } else {
+        if (tname !== null) {
+          type = doc.get(tname);
+        } else if (typeID !== null) {
+          if (getState(store, typeID.client) <= typeID.clock) {
+            // type does not exist yet
+            return null
+          }
+          const { item } = followRedone(store, typeID);
+          if (item instanceof Item && item.content instanceof ContentType) {
+            type = item.content.type;
+          } else {
+            // struct is garbage collected
+            return null
+          }
+        } else {
+          throw unexpectedCase()
+        }
+        if (assoc >= 0) {
+          index = type._length;
+        } else {
+          index = 0;
+        }
+      }
+      return createAbsolutePosition(type, index, rpos.assoc)
+    };
+
+    /**
+     * @param {RelativePosition|null} a
+     * @param {RelativePosition|null} b
+     * @return {boolean}
+     *
+     * @function
+     */
+    const compareRelativePositions = (a, b) => a === b || (
+      a !== null && b !== null && a.tname === b.tname && compareIDs(a.item, b.item) && compareIDs(a.type, b.type) && a.assoc === b.assoc
+    );
+
     class Snapshot {
       /**
        * @param {DeleteSet} ds
@@ -46697,13 +48570,85 @@ var app = (function () {
     }
 
     /**
+     * @param {Snapshot} snap1
+     * @param {Snapshot} snap2
+     * @return {boolean}
+     */
+    const equalSnapshots = (snap1, snap2) => {
+      const ds1 = snap1.ds.clients;
+      const ds2 = snap2.ds.clients;
+      const sv1 = snap1.sv;
+      const sv2 = snap2.sv;
+      if (sv1.size !== sv2.size || ds1.size !== ds2.size) {
+        return false
+      }
+      for (const [key, value] of sv1.entries()) {
+        if (sv2.get(key) !== value) {
+          return false
+        }
+      }
+      for (const [client, dsitems1] of ds1.entries()) {
+        const dsitems2 = ds2.get(client) || [];
+        if (dsitems1.length !== dsitems2.length) {
+          return false
+        }
+        for (let i = 0; i < dsitems1.length; i++) {
+          const dsitem1 = dsitems1[i];
+          const dsitem2 = dsitems2[i];
+          if (dsitem1.clock !== dsitem2.clock || dsitem1.len !== dsitem2.len) {
+            return false
+          }
+        }
+      }
+      return true
+    };
+
+    /**
+     * @param {Snapshot} snapshot
+     * @param {DSEncoderV1 | DSEncoderV2} [encoder]
+     * @return {Uint8Array}
+     */
+    const encodeSnapshotV2 = (snapshot, encoder = new DSEncoderV2()) => {
+      writeDeleteSet(encoder, snapshot.ds);
+      writeStateVector(encoder, snapshot.sv);
+      return encoder.toUint8Array()
+    };
+
+    /**
+     * @param {Snapshot} snapshot
+     * @return {Uint8Array}
+     */
+    const encodeSnapshot = snapshot => encodeSnapshotV2(snapshot, new DSEncoderV1());
+
+    /**
+     * @param {Uint8Array} buf
+     * @param {DSDecoderV1 | DSDecoderV2} [decoder]
+     * @return {Snapshot}
+     */
+    const decodeSnapshotV2 = (buf, decoder = new DSDecoderV2(createDecoder(buf))) => {
+      return new Snapshot(readDeleteSet(decoder), readStateVector(decoder))
+    };
+
+    /**
+     * @param {Uint8Array} buf
+     * @return {Snapshot}
+     */
+    const decodeSnapshot = buf => decodeSnapshotV2(buf, new DSDecoderV1(createDecoder(buf)));
+
+    /**
      * @param {DeleteSet} ds
      * @param {Map<number,number>} sm
      * @return {Snapshot}
      */
     const createSnapshot = (ds, sm) => new Snapshot(ds, sm);
 
-    createSnapshot(createDeleteSet(), new Map());
+    const emptySnapshot = createSnapshot(createDeleteSet(), new Map());
+
+    /**
+     * @param {Doc} doc
+     * @return {Snapshot}
+     */
+    const snapshot = doc => createSnapshot(createDeleteSetFromStructStore(doc.store), getStateVector(doc.store));
 
     /**
      * @param {Item} item
@@ -46733,6 +48678,54 @@ var app = (function () {
         iterateDeletedStructs(transaction, snapshot.ds, item => {});
         meta.add(snapshot);
       }
+    };
+
+    /**
+     * @param {Doc} originDoc
+     * @param {Snapshot} snapshot
+     * @param {Doc} [newDoc] Optionally, you may define the Yjs document that receives the data from originDoc
+     * @return {Doc}
+     */
+    const createDocFromSnapshot = (originDoc, snapshot, newDoc = new Doc()) => {
+      if (originDoc.gc) {
+        // we should not try to restore a GC-ed document, because some of the restored items might have their content deleted
+        throw new Error('originDoc must not be garbage collected')
+      }
+      const { sv, ds } = snapshot;
+
+      const encoder = new UpdateEncoderV2();
+      originDoc.transact(transaction => {
+        let size = 0;
+        sv.forEach(clock => {
+          if (clock > 0) {
+            size++;
+          }
+        });
+        writeVarUint(encoder.restEncoder, size);
+        // splitting the structs before writing them to the encoder
+        for (const [client, clock] of sv) {
+          if (clock === 0) {
+            continue
+          }
+          if (clock < getState(originDoc.store, client)) {
+            getItemCleanStart(transaction, createID(client, clock));
+          }
+          const structs = originDoc.store.clients.get(client) || [];
+          const lastStructIndex = findIndexSS(structs, clock - 1);
+          // write # encoded structs
+          writeVarUint(encoder.restEncoder, lastStructIndex + 1);
+          encoder.writeClient(client);
+          // first clock written is 0
+          writeVarUint(encoder.restEncoder, 0);
+          for (let i = 0; i <= lastStructIndex; i++) {
+            structs[i].write(encoder, 0);
+          }
+        }
+        writeDeleteSet(encoder, ds);
+      });
+
+      applyUpdateV2(newDoc, encoder.toUint8Array(), 'snapshot');
+      return newDoc
     };
 
     class StructStore {
@@ -47164,6 +49157,16 @@ var app = (function () {
           }
         }
       });
+    };
+
+    /**
+     * @param {DeleteSet} ds
+     * @param {StructStore} store
+     * @param {function(Item):boolean} gcFilter
+     */
+    const tryGc = (ds, store, gcFilter) => {
+      tryGcDeleteSet(ds, store, gcFilter);
+      tryMergeDeleteSet(ds, store);
     };
 
     /**
@@ -47681,6 +49684,29 @@ var app = (function () {
       }
     }
 
+    /**
+     * @param {Uint8Array} update
+     *
+     */
+    const logUpdate = update => logUpdateV2(update, UpdateDecoderV1);
+
+    /**
+     * @param {Uint8Array} update
+     * @param {typeof UpdateDecoderV2 | typeof UpdateDecoderV1} [YDecoder]
+     *
+     */
+    const logUpdateV2 = (update, YDecoder = UpdateDecoderV2) => {
+      const structs = [];
+      const updateDecoder = new YDecoder(createDecoder(update));
+      const lazyDecoder = new LazyStructReader(updateDecoder, false);
+      for (let curr = lazyDecoder.curr; curr !== null; curr = lazyDecoder.next()) {
+        structs.push(curr);
+      }
+      print('Structs: ', structs);
+      const ds = readDeleteSet(updateDecoder);
+      print('DeleteSet: ', ds);
+    };
+
     class LazyStructWriter {
       /**
        * @param {UpdateEncoderV1 | UpdateEncoderV2} encoder
@@ -47709,6 +49735,111 @@ var app = (function () {
      * @return {Uint8Array}
      */
     const mergeUpdates = updates => mergeUpdatesV2(updates, UpdateDecoderV1, UpdateEncoderV1);
+
+    /**
+     * @param {Uint8Array} update
+     * @param {typeof DSEncoderV1 | typeof DSEncoderV2} YEncoder
+     * @param {typeof UpdateDecoderV1 | typeof UpdateDecoderV2} YDecoder
+     * @return {Uint8Array}
+     */
+    const encodeStateVectorFromUpdateV2 = (update, YEncoder = DSEncoderV2, YDecoder = UpdateDecoderV2) => {
+      const encoder = new YEncoder();
+      const updateDecoder = new LazyStructReader(new YDecoder(createDecoder(update)), false);
+      let curr = updateDecoder.curr;
+      if (curr !== null) {
+        let size = 0;
+        let currClient = curr.id.client;
+        let stopCounting = curr.id.clock !== 0; // must start at 0
+        let currClock = stopCounting ? 0 : curr.id.clock + curr.length;
+        for (; curr !== null; curr = updateDecoder.next()) {
+          if (currClient !== curr.id.client) {
+            if (currClock !== 0) {
+              size++;
+              // We found a new client
+              // write what we have to the encoder
+              writeVarUint(encoder.restEncoder, currClient);
+              writeVarUint(encoder.restEncoder, currClock);
+            }
+            currClient = curr.id.client;
+            currClock = 0;
+            stopCounting = curr.id.clock !== 0;
+          }
+          // we ignore skips
+          if (curr.constructor === Skip) {
+            stopCounting = true;
+          }
+          if (!stopCounting) {
+            currClock = curr.id.clock + curr.length;
+          }
+        }
+        // write what we have
+        if (currClock !== 0) {
+          size++;
+          writeVarUint(encoder.restEncoder, currClient);
+          writeVarUint(encoder.restEncoder, currClock);
+        }
+        // prepend the size of the state vector
+        const enc = createEncoder();
+        writeVarUint(enc, size);
+        writeBinaryEncoder(enc, encoder.restEncoder);
+        encoder.restEncoder = enc;
+        return encoder.toUint8Array()
+      } else {
+        writeVarUint(encoder.restEncoder, 0);
+        return encoder.toUint8Array()
+      }
+    };
+
+    /**
+     * @param {Uint8Array} update
+     * @return {Uint8Array}
+     */
+    const encodeStateVectorFromUpdate = update => encodeStateVectorFromUpdateV2(update, DSEncoderV1, UpdateDecoderV1);
+
+    /**
+     * @param {Uint8Array} update
+     * @param {typeof UpdateDecoderV1 | typeof UpdateDecoderV2} YDecoder
+     * @return {{ from: Map<number,number>, to: Map<number,number> }}
+     */
+    const parseUpdateMetaV2 = (update, YDecoder = UpdateDecoderV2) => {
+      /**
+       * @type {Map<number, number>}
+       */
+      const from = new Map();
+      /**
+       * @type {Map<number, number>}
+       */
+      const to = new Map();
+      const updateDecoder = new LazyStructReader(new YDecoder(createDecoder(update)), false);
+      let curr = updateDecoder.curr;
+      if (curr !== null) {
+        let currClient = curr.id.client;
+        let currClock = curr.id.clock;
+        // write the beginning to `from`
+        from.set(currClient, currClock);
+        for (; curr !== null; curr = updateDecoder.next()) {
+          if (currClient !== curr.id.client) {
+            // We found a new client
+            // write the end to `to`
+            to.set(currClient, currClock);
+            // write the beginning to `from`
+            from.set(curr.id.client, curr.id.clock);
+            // update currClient
+            currClient = curr.id.client;
+          }
+          currClock = curr.id.clock + curr.length;
+        }
+        // write the end to `to`
+        to.set(currClient, currClock);
+      }
+      return { from, to }
+    };
+
+    /**
+     * @param {Uint8Array} update
+     * @return {{ from: Map<number,number>, to: Map<number,number> }}
+     */
+    const parseUpdateMeta = update => parseUpdateMetaV2(update, UpdateDecoderV1);
 
     /**
      * This method is intended to slice any kind of struct and retrieve the right part.
@@ -47921,6 +50052,12 @@ var app = (function () {
     };
 
     /**
+     * @param {Uint8Array} update
+     * @param {Uint8Array} sv
+     */
+    const diffUpdate = (update, sv) => diffUpdateV2(update, sv, UpdateDecoderV1, UpdateEncoderV1);
+
+    /**
      * @param {LazyStructWriter} lazyWriter
      */
     const flushLazyStructWriter = lazyWriter => {
@@ -48003,6 +50140,11 @@ var app = (function () {
       writeDeleteSet(updateEncoder, ds);
       return updateEncoder.toUint8Array()
     };
+
+    /**
+     * @param {Uint8Array} update
+     */
+    const convertUpdateFormatV1ToV2 = update => convertUpdateFormat(update, UpdateDecoderV1, UpdateEncoderV2);
 
     /**
      * @param {Uint8Array} update
@@ -48447,6 +50589,22 @@ var app = (function () {
     };
 
     /**
+     * Accumulate all (list) children of a type and return them as an Array.
+     *
+     * @param {AbstractType<any>} t
+     * @return {Array<Item>}
+     */
+    const getTypeChildren = t => {
+      let s = t._start;
+      const arr = [];
+      while (s) {
+        arr.push(s);
+        s = s.right;
+      }
+      return arr
+    };
+
+    /**
      * Call event listeners with an event. This will also add an event to all
      * parents (for `.observeDeep` handlers).
      *
@@ -48665,6 +50823,29 @@ var app = (function () {
       let n = type._start;
       while (n !== null) {
         if (n.countable && !n.deleted) {
+          const c = n.content.getContent();
+          for (let i = 0; i < c.length; i++) {
+            cs.push(c[i]);
+          }
+        }
+        n = n.right;
+      }
+      return cs
+    };
+
+    /**
+     * @param {AbstractType<any>} type
+     * @param {Snapshot} snapshot
+     * @return {Array<any>}
+     *
+     * @private
+     * @function
+     */
+    const typeListToArraySnapshot = (type, snapshot) => {
+      const cs = [];
+      let n = type._start;
+      while (n !== null) {
+        if (n.countable && isVisible(n, snapshot)) {
           const c = n.content.getContent();
           for (let i = 0; i < c.length; i++) {
             cs.push(c[i]);
@@ -49056,6 +51237,23 @@ var app = (function () {
     const typeMapHas = (parent, key) => {
       const val = parent._map.get(key);
       return val !== undefined && !val.deleted
+    };
+
+    /**
+     * @param {AbstractType<any>} parent
+     * @param {string} key
+     * @param {Snapshot} snapshot
+     * @return {Object<string,any>|number|null|Array<any>|string|Uint8Array|AbstractType<any>|undefined}
+     *
+     * @private
+     * @function
+     */
+    const typeMapGetSnapshot = (parent, key, snapshot) => {
+      let v = parent._map.get(key) || null;
+      while (v !== null && (!snapshot.sv.has(v.id.client) || v.id.clock >= (snapshot.sv.get(v.id.client) || 0))) {
+        v = v.left;
+      }
+      return v !== null && isVisible(v, snapshot) ? v.content.getContent()[v.length - 1] : undefined
     };
 
     /**
@@ -53480,13 +55678,101 @@ var app = (function () {
     }
     glo[importIdentifier] = true;
 
+    var Y = /*#__PURE__*/Object.freeze({
+        __proto__: null,
+        AbsolutePosition: AbsolutePosition,
+        AbstractConnector: AbstractConnector,
+        AbstractStruct: AbstractStruct,
+        AbstractType: AbstractType,
+        Array: YArray,
+        ContentAny: ContentAny,
+        ContentBinary: ContentBinary,
+        ContentDeleted: ContentDeleted,
+        ContentEmbed: ContentEmbed,
+        ContentFormat: ContentFormat,
+        ContentJSON: ContentJSON,
+        ContentString: ContentString,
+        ContentType: ContentType,
+        Doc: Doc,
+        GC: GC,
+        ID: ID,
+        Item: Item,
+        Map: YMap,
+        PermanentUserData: PermanentUserData,
+        RelativePosition: RelativePosition,
+        Snapshot: Snapshot,
+        Text: YText,
+        Transaction: Transaction,
+        UndoManager: UndoManager,
+        XmlElement: YXmlElement,
+        XmlFragment: YXmlFragment,
+        XmlHook: YXmlHook,
+        XmlText: YXmlText,
+        YArrayEvent: YArrayEvent,
+        YEvent: YEvent,
+        YMapEvent: YMapEvent,
+        YTextEvent: YTextEvent,
+        YXmlEvent: YXmlEvent,
+        applyUpdate: applyUpdate,
+        applyUpdateV2: applyUpdateV2,
+        cleanupYTextFormatting: cleanupYTextFormatting,
+        compareIDs: compareIDs,
+        compareRelativePositions: compareRelativePositions,
+        convertUpdateFormatV1ToV2: convertUpdateFormatV1ToV2,
+        convertUpdateFormatV2ToV1: convertUpdateFormatV2ToV1,
+        createAbsolutePositionFromRelativePosition: createAbsolutePositionFromRelativePosition,
+        createDeleteSet: createDeleteSet,
+        createDeleteSetFromStructStore: createDeleteSetFromStructStore,
+        createDocFromSnapshot: createDocFromSnapshot,
+        createID: createID,
+        createRelativePositionFromJSON: createRelativePositionFromJSON,
+        createRelativePositionFromTypeIndex: createRelativePositionFromTypeIndex,
+        createSnapshot: createSnapshot,
+        decodeRelativePosition: decodeRelativePosition,
+        decodeSnapshot: decodeSnapshot,
+        decodeSnapshotV2: decodeSnapshotV2,
+        decodeStateVector: decodeStateVector,
+        diffUpdate: diffUpdate,
+        diffUpdateV2: diffUpdateV2,
+        emptySnapshot: emptySnapshot,
+        encodeRelativePosition: encodeRelativePosition,
+        encodeSnapshot: encodeSnapshot,
+        encodeSnapshotV2: encodeSnapshotV2,
+        encodeStateAsUpdate: encodeStateAsUpdate,
+        encodeStateAsUpdateV2: encodeStateAsUpdateV2,
+        encodeStateVector: encodeStateVector,
+        encodeStateVectorFromUpdate: encodeStateVectorFromUpdate,
+        encodeStateVectorFromUpdateV2: encodeStateVectorFromUpdateV2,
+        equalSnapshots: equalSnapshots,
+        findIndexSS: findIndexSS,
+        findRootTypeKey: findRootTypeKey,
+        getItem: getItem,
+        getState: getState,
+        getTypeChildren: getTypeChildren,
+        isDeleted: isDeleted,
+        isParentOf: isParentOf,
+        iterateDeletedStructs: iterateDeletedStructs,
+        logType: logType,
+        logUpdate: logUpdate,
+        logUpdateV2: logUpdateV2,
+        mergeUpdates: mergeUpdates,
+        mergeUpdatesV2: mergeUpdatesV2,
+        parseUpdateMeta: parseUpdateMeta,
+        parseUpdateMetaV2: parseUpdateMetaV2,
+        readUpdate: readUpdate$1,
+        readUpdateV2: readUpdateV2,
+        relativePositionToJSON: relativePositionToJSON,
+        snapshot: snapshot,
+        transact: transact,
+        tryGc: tryGc,
+        typeListToArraySnapshot: typeListToArraySnapshot,
+        typeMapGetSnapshot: typeMapGetSnapshot
+    });
+
     //import * as TWEEN from "@tweenjs/tween.js"
     class Pacman extends AbstractType {
-        constructor(name, position) {
+        constructor(id, name, peerId, position) {
             super();
-            //public numDotsEaten: number
-            //public atePellet: boolean
-            //private tweenAnimation: TWEEN.Tween<THREE.Vector3> | null
             this.deletedFlag = 0;
             // Create spheres with decreasingly small horizontal sweeps, in order
             // to create pacman "death" animation.
@@ -53497,20 +55783,21 @@ var app = (function () {
                 pacmanGeometries.push(new SphereGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2));
                 pacmanGeometries[i].rotateX(Math.PI / 2);
             }
-            let pacmanMaterial = new MeshPhongMaterial({ color: 'yellow', side: DoubleSide });
+            let pacmanMaterial = Pacman.PACMAN_ONLINE_MATERIAL;
             this.mesh = new Mesh(pacmanGeometries[0], pacmanMaterial);
             this.frames = pacmanGeometries;
-            //this.currentFrame = 0
             this.distanceMoved = 0;
             this.lastDistanceMoved = 0;
             // Initialize pacman facing to the left.
             this.mesh.position.copy(position);
             this.direction = new Vector3(-1, 0, 0);
-            //this.numDotsEaten = 0
-            this.id = name;
+            this.id = id;
+            this.name = name;
+            this.isPlaying = false;
+            this.isOnline = true;
+            this.peerId = peerId;
             this.frameCounter = 0;
             this.isMoving = false;
-            //this.tweenAnimation = null
         }
         // Update pacman mesh simulating the eat movement
         updateFrame() {
@@ -53526,6 +55813,9 @@ var app = (function () {
             // set the up direction so that it points forward.
             this.mesh.up.copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2);
             this.mesh.lookAt((new Vector3()).copy(this.mesh.position).add(Utils.UP));
+            if (!this.isOnline) {
+                this.mesh.material = Pacman.PACMAN_OFFLINE_MATERIAL;
+            }
         }
         // Used to predict movement of other players to avoid glitch due to poor connection
         calculateFakeMovement(delta) {
@@ -53585,12 +55875,11 @@ var app = (function () {
                 levelMap.removeAt(this.mesh.position)
                 //this.numDotsEaten += 1
             }*/
-            state.getDots();
             let x = Math.round(this.mesh.position.x), y = Math.round(this.mesh.position.y);
             let dot = state.getDot(x, y);
             if (dot != null) {
                 dot.pacmanId = this.id;
-                state.setDot(dot);
+                state.updateDotShared(dot);
             }
             // Make pacman eat power pellets.
             //this.atePellet = false
@@ -53612,32 +55901,31 @@ var app = (function () {
         toPlainObj() {
             let obj = {};
             obj["id"] = this.id;
+            obj["name"] = this.name;
+            obj["peerId"] = this.peerId;
             obj["position"] = [this.mesh.position.x, this.mesh.position.y, this.mesh.position.z];
             obj["direction"] = [this.direction.x, this.direction.y, this.direction.z];
             obj["distanceMoved"] = this.distanceMoved;
             obj["isMoving"] = this.isMoving;
+            obj["isPlaying"] = this.isPlaying;
+            obj["isOnline"] = this.isOnline;
             return obj;
         }
         // New pacman from plain js object
         static fromObj(obj) {
             let position = new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]);
-            let out = new Pacman(obj["id"], position);
+            let out = new Pacman(obj["id"], obj["name"], obj["peerId"], position);
             out.copyObj(obj);
             return out;
         }
         // Copy from a js plain object
         copyObj(obj) {
-            /*if(this.tweenAnimation != null) {
-                this.tweenAnimation.end()
-                this.tweenAnimation.stop()
-            }
-            this.tweenAnimation = new TWEEN.Tween(this.mesh.position)
-                                .to(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]), 500)
-                                .start()*/
             this.mesh.position.copy(new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]));
             this.direction.copy(new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]));
             this.distanceMoved = obj["distanceMoved"];
             this.isMoving = obj["isMoving"];
+            this.isPlaying = obj["isPlaying"];
+            this.isOnline = obj["isOnline"];
         }
         // Copy object if it has the same id
         copyObjIfSameId(obj) {
@@ -53650,6 +55938,8 @@ var app = (function () {
     }
     Pacman.PACMAN_SPEED = 2;
     Pacman.PACMAN_RADIUS = 0.4;
+    Pacman.PACMAN_ONLINE_MATERIAL = new MeshPhongMaterial({ color: 'yellow', side: DoubleSide });
+    Pacman.PACMAN_OFFLINE_MATERIAL = new MeshPhongMaterial({ color: 'gray', side: DoubleSide });
 
     class Game {
         createRenderer() {
@@ -53787,7 +56077,7 @@ var app = (function () {
             this.mesh = new Mesh(dotGeometry, dotMaterial);
             this.mesh.position.copy(position);
             this.id = id;
-            this.pacmanId = Dot.DOT_NONE_PACMAN;
+            this.pacmanId = null;
         }
         setVisible(value) {
             this.mesh.visible = value;
@@ -53796,7 +56086,7 @@ var app = (function () {
             return this.mesh.position;
         }
         isVisible() {
-            return this.pacmanId == Dot.DOT_NONE_PACMAN;
+            return this.pacmanId == null;
         }
         addToScene(scene) {
             scene.add(this.mesh);
@@ -53804,7 +56094,6 @@ var app = (function () {
     }
     Dot.DOT_RADIUS = 0.1;
     Dot.DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2;
-    Dot.DOT_NONE_PACMAN = "NONE";
 
     /**
      * Description: A THREE loader for STL ASCII files, as created by Solidworks and other CAD programs.
@@ -54382,6 +56671,329 @@ var app = (function () {
         '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
         '# # # # # # # # # # # # # # # # # # # # # # # # # # # #'
     ];
+
+    //import * as TWEEN from "@tweenjs/tween.js"
+    writable(new Array());
+    class GameState {
+        constructor(ydoc) {
+            this.pacmansShared = ydoc.getMap('pacmans');
+            this.pacmansLocal = new Map();
+            this.ghostsShared = ydoc.getMap('ghosts');
+            this.ghostsLocal = new Map();
+            this.dotsShared = ydoc.getMap('dots');
+            this.dotsMap = {};
+            this.pacmanDelIndex = 0;
+            this.currentPacman = null;
+        }
+        setCurrentPacman(currentPacman) {
+            this.currentPacman = currentPacman;
+        }
+        updatePacmanLocal(scene) {
+            this.pacmanDelIndex++;
+            this.pacmansShared.forEach((value, key) => {
+                let pLocal = this.pacmansLocal.get(key);
+                if (pLocal != null) {
+                    if (this.currentPacman && this.currentPacman.id != pLocal.id) {
+                        // Update pacman object
+                        pLocal.copyObjIfSameId(value);
+                        pLocal.deletedFlag = this.pacmanDelIndex;
+                    }
+                }
+                else {
+                    // Add new pacman object
+                    let pacman = Pacman.fromObj(value);
+                    pacman.deletedFlag = this.pacmanDelIndex;
+                    this.pacmansLocal.set(key, pacman);
+                    // Add pacman to scene
+                    pacman.addToScene(scene);
+                }
+            });
+            // Delete pacman on local and update store
+            for (let id in this.pacmansLocal) {
+                let local = this.pacmansLocal.get(id);
+                if (local[1] != this.pacmanDelIndex)
+                    this.pacmansLocal.delete(id);
+            }
+            //TWEEN.update();
+        }
+        setPacman(pacman) {
+            this.pacmansShared.set(pacman.id, pacman.toPlainObj());
+            this.pacmansLocal.set(pacman.id, pacman);
+        }
+        getPacmans() {
+            return this.pacmansLocal.values();
+        }
+        updateGhostsLocal() {
+        }
+        setGhost(ghost) {
+            this.ghostsShared.set(ghost.id, ghost.toPlainObj());
+            this.ghostsLocal.set(ghost.id, ghost);
+        }
+        getGhosts() {
+            return this.ghostsLocal.values();
+        }
+        updateDotsLocal() {
+            for (const y in this.dotsMap) {
+                for (const x in this.dotsMap[y]) {
+                    let dot = this.dotsMap[y][x];
+                    let pacmanId = this.dotsShared.get(dot.id);
+                    if (pacmanId) {
+                        dot.setVisible(false);
+                    }
+                    else {
+                        dot.setVisible(true);
+                    }
+                }
+            }
+        }
+        initDot(dot) {
+            // Add to map
+            let x = dot.getPosition().x;
+            let y = dot.getPosition().y;
+            if (!this.dotsMap.hasOwnProperty(y)) {
+                this.dotsMap[y] = {};
+            }
+            this.dotsMap[y][x] = dot;
+        }
+        // Update dot state
+        updateDotShared(dot) {
+            if (dot.pacmanId) {
+                this.dotsShared.set(dot.id, dot.pacmanId);
+            }
+        }
+        getDot(x, y) {
+            try {
+                return this.dotsMap[y][x];
+            }
+            catch (e) {
+                console.log(e);
+                return null;
+            }
+        }
+        checkIfAllPlaying() {
+            let out = true;
+            this.pacmansShared.forEach((value, key) => {
+                if (value["isPlaying"] == false)
+                    out = false;
+            });
+            return out;
+        }
+        setCurrentPacmanPlaying(value) {
+            this.currentPacman.isPlaying = value;
+            this.setPacman(this.currentPacman);
+        }
+    }
+
+    /* src\pages\Game.svelte generated by Svelte v3.44.3 */
+
+    const { console: console_1$1 } = globals;
+
+    function create_fragment$1(ctx) {
+    	const block = {
+    		c: noop,
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: noop,
+    		p: noop,
+    		i: noop,
+    		o: noop,
+    		d: noop
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$1.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$1($$self, $$props, $$invalidate) {
+    	let $pacmanName;
+    	let $pacmanId;
+    	validate_store(pacmanName, 'pacmanName');
+    	component_subscribe($$self, pacmanName, $$value => $$invalidate(3, $pacmanName = $$value));
+    	validate_store(pacmanId, 'pacmanId');
+    	component_subscribe($$self, pacmanId, $$value => $$invalidate(4, $pacmanId = $$value));
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots('Game', slots, []);
+    	let { ydoc } = $$props;
+    	let { provider } = $$props;
+    	console.log("Game created");
+
+    	onMount(() => {
+    		
+    	});
+
+    	onDestroy(() => {
+    		document.body.removeChild(renderer.domElement);
+    	}); //clearInterval(interval)
+
+    	let game = new Game();
+    	let keys = new KeyState();
+    	let renderer = game.createRenderer();
+    	let scene = game.createScene();
+    	let state = new GameState(ydoc);
+    	let map = new LevelMap(scene, state);
+    	let pacman = new Pacman($pacmanId, $pacmanName, provider.room.peerId, map.pacmanSpawn);
+    	state.setCurrentPacman(pacman);
+    	globalState.set(state);
+    	pacman.addToScene(scene);
+    	let camera = new Camera(renderer, pacman);
+
+    	//let hudCamera = game.createHudCamera(map)
+    	let frameCounter = 0;
+
+    	// Main game loop
+    	game.gameLoop(delta => {
+    		// Update local list of pacman
+    		state.updatePacmanLocal(scene);
+
+    		state.updateDotsLocal();
+    		pacman.movePacman(delta, keys, map, state);
+    		pacman.updateFrame();
+    		camera.updateCamera(delta);
+
+    		// Set my pacman state
+    		state.setPacman(pacman);
+
+    		// Update other pacman frames
+    		for (let p of state.getPacmans()) {
+    			if (p.id != pacman.id) {
+    				p.updateFrame();
+    			} //p.calculateFakeMovement(delta)
+    		}
+
+    		// Render main view
+    		renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
+
+    		renderer.render(scene, camera.get());
+
+    		// Render HUD
+    		//renderHud(renderer, hudCamera, scene)
+    		if (frameCounter % 30 == 0) {
+    			controlOfflinePacmans();
+    		}
+
+    		frameCounter++;
+    	});
+
+    	function controlOfflinePacmans() {
+    		let connected = provider.room.bcConns;
+
+    		for (let p of state.getPacmans()) {
+    			if (p.peerId != pacman.peerId && p.isOnline && !connected.has(p.peerId)) {
+    				p.isOnline = false;
+    				state.setPacman(p);
+    				console.log("Offline pacman " + p.name);
+    			}
+    		}
+    	}
+
+    	const writable_props = ['ydoc', 'provider'];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<Game> was created with unknown prop '${key}'`);
+    	});
+
+    	$$self.$$set = $$props => {
+    		if ('ydoc' in $$props) $$invalidate(0, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(1, provider = $$props.provider);
+    	};
+
+    	$$self.$capture_state = () => ({
+    		Camera,
+    		Game,
+    		KeyState,
+    		LevelMap,
+    		Pacman,
+    		GameState,
+    		pacmanName,
+    		pacmanId,
+    		globalState,
+    		onMount,
+    		onDestroy,
+    		ydoc,
+    		provider,
+    		game,
+    		keys,
+    		renderer,
+    		scene,
+    		state,
+    		map,
+    		pacman,
+    		camera,
+    		frameCounter,
+    		controlOfflinePacmans,
+    		$pacmanName,
+    		$pacmanId
+    	});
+
+    	$$self.$inject_state = $$props => {
+    		if ('ydoc' in $$props) $$invalidate(0, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(1, provider = $$props.provider);
+    		if ('game' in $$props) game = $$props.game;
+    		if ('keys' in $$props) keys = $$props.keys;
+    		if ('renderer' in $$props) renderer = $$props.renderer;
+    		if ('scene' in $$props) scene = $$props.scene;
+    		if ('state' in $$props) state = $$props.state;
+    		if ('map' in $$props) map = $$props.map;
+    		if ('pacman' in $$props) pacman = $$props.pacman;
+    		if ('camera' in $$props) camera = $$props.camera;
+    		if ('frameCounter' in $$props) frameCounter = $$props.frameCounter;
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [ydoc, provider];
+    }
+
+    class Game_1 extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$1, create_fragment$1, safe_not_equal, { ydoc: 0, provider: 1 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Game_1",
+    			options,
+    			id: create_fragment$1.name
+    		});
+
+    		const { ctx } = this.$$;
+    		const props = options.props || {};
+
+    		if (/*ydoc*/ ctx[0] === undefined && !('ydoc' in props)) {
+    			console_1$1.warn("<Game> was created without expected prop 'ydoc'");
+    		}
+
+    		if (/*provider*/ ctx[1] === undefined && !('provider' in props)) {
+    			console_1$1.warn("<Game> was created without expected prop 'provider'");
+    		}
+    	}
+
+    	get ydoc() {
+    		throw new Error("<Game>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set ydoc(value) {
+    		throw new Error("<Game>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get provider() {
+    		throw new Error("<Game>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set provider(value) {
+    		throw new Error("<Game>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+    }
 
     /* eslint-env browser */
 
@@ -55773,246 +58385,133 @@ var app = (function () {
       }
     }
 
-    /**
-     * The Ease class provides a collection of easing functions for use with tween.js.
-     */
-
-    var now;
-    // Include a performance.now polyfill.
-    // In node.js, use process.hrtime.
-    // eslint-disable-next-line
-    // @ts-ignore
-    if (typeof self === 'undefined' && typeof process !== 'undefined' && process.hrtime) {
-        now = function () {
-            // eslint-disable-next-line
-            // @ts-ignore
-            var time = process.hrtime();
-            // Convert [seconds, nanoseconds] to milliseconds.
-            return time[0] * 1000 + time[1] / 1000000;
-        };
-    }
-    // In a browser, use self.performance.now if it is available.
-    else if (typeof self !== 'undefined' && self.performance !== undefined && self.performance.now !== undefined) {
-        // This must be bound, because directly assigning this function
-        // leads to an invocation exception in Chrome.
-        now = self.performance.now.bind(self.performance);
-    }
-    // Use Date.now if it is available.
-    else if (Date.now !== undefined) {
-        now = Date.now;
-    }
-    // Otherwise, use 'new Date().getTime()'.
-    else {
-        now = function () {
-            return new Date().getTime();
-        };
-    }
-    var now$1 = now;
-
-    /**
-     * Controlling groups of tweens
-     *
-     * Using the TWEEN singleton to manage your tweens can cause issues in large apps with many components.
-     * In these cases, you may want to create your own smaller groups of tween
-     */
-    var Group = /** @class */ (function () {
-        function Group() {
-            this._tweens = {};
-            this._tweensAddedDuringUpdate = {};
-        }
-        Group.prototype.getAll = function () {
-            var _this = this;
-            return Object.keys(this._tweens).map(function (tweenId) {
-                return _this._tweens[tweenId];
-            });
-        };
-        Group.prototype.removeAll = function () {
-            this._tweens = {};
-        };
-        Group.prototype.add = function (tween) {
-            this._tweens[tween.getId()] = tween;
-            this._tweensAddedDuringUpdate[tween.getId()] = tween;
-        };
-        Group.prototype.remove = function (tween) {
-            delete this._tweens[tween.getId()];
-            delete this._tweensAddedDuringUpdate[tween.getId()];
-        };
-        Group.prototype.update = function (time, preserve) {
-            if (time === void 0) { time = now$1(); }
-            if (preserve === void 0) { preserve = false; }
-            var tweenIds = Object.keys(this._tweens);
-            if (tweenIds.length === 0) {
-                return false;
-            }
-            // Tweens are updated in "batches". If you add a new tween during an
-            // update, then the new tween will be updated in the next batch.
-            // If you remove a tween during an update, it may or may not be updated.
-            // However, if the removed tween was added during the current batch,
-            // then it will not be updated.
-            while (tweenIds.length > 0) {
-                this._tweensAddedDuringUpdate = {};
-                for (var i = 0; i < tweenIds.length; i++) {
-                    var tween = this._tweens[tweenIds[i]];
-                    var autoStart = !preserve;
-                    if (tween && tween.update(time, autoStart) === false && !preserve) {
-                        delete this._tweens[tweenIds[i]];
-                    }
-                }
-                tweenIds = Object.keys(this._tweensAddedDuringUpdate);
-            }
-            return true;
-        };
-        return Group;
-    }());
-
-    var mainGroup = new Group();
-    /**
-     * Controlling groups of tweens
-     *
-     * Using the TWEEN singleton to manage your tweens can cause issues in large apps with many components.
-     * In these cases, you may want to create your own smaller groups of tweens.
-     */
-    var TWEEN = mainGroup;
-    // This is the best way to export things in a way that's compatible with both ES
-    // Modules and CommonJS, without build hacks, and so as not to break the
-    // existing API.
-    // https://github.com/rollup/rollup/issues/1961#issuecomment-423037881
-    TWEEN.getAll.bind(TWEEN);
-    TWEEN.removeAll.bind(TWEEN);
-    TWEEN.add.bind(TWEEN);
-    TWEEN.remove.bind(TWEEN);
-    var update = TWEEN.update.bind(TWEEN);
-
-    class GameState {
-        constructor(scene) {
-            const ydoc = new Doc({ gc: true });
-            new WebrtcProvider('distribuited-pacman', ydoc);
-            this.pacmansShared = ydoc.getMap('pacmans');
-            this.pacmansLocal = new Map();
-            this.pacmanDelIndex = 0;
-            this.scene = scene;
-            this.ghostsShared = ydoc.getMap('ghosts');
-            this.ghostsLocal = new Map();
-            this.dotsShared = ydoc.getMap('dots');
-            this.dotsLocal = new Map();
-            this.dotsMap = {};
-        }
-        updatePacmanLocal(thisPacmanId) {
-            this.pacmanDelIndex++;
-            this.pacmansShared.forEach((value, key) => {
-                let pLocal = this.pacmansLocal.get(key);
-                if (pLocal != null) {
-                    if (thisPacmanId != pLocal.id) {
-                        // Update pacman object
-                        pLocal.copyObjIfSameId(value);
-                        pLocal.deletedFlag = this.pacmanDelIndex;
-                    }
-                }
-                else {
-                    // Add new pacman object
-                    let pacman = Pacman.fromObj(value);
-                    pacman.deletedFlag = this.pacmanDelIndex;
-                    this.pacmansLocal.set(key, pacman);
-                    // Add pacman to scene
-                    pacman.addToScene(this.scene);
-                }
-            });
-            // Delete pacman on local
-            for (let id in this.pacmansLocal) {
-                let local = this.pacmansLocal.get(id);
-                if (local[1] != this.pacmanDelIndex)
-                    this.pacmansLocal.delete(id);
-            }
-            update();
-        }
-        setPacman(pacman) {
-            this.pacmansShared.set(pacman.id, pacman.toPlainObj());
-            this.pacmansLocal.set(pacman.id, pacman);
-        }
-        getPacmans() {
-            return this.pacmansLocal.values();
-        }
-        updateGhostsLocal() {
-        }
-        setGhost(ghost) {
-            this.ghostsShared.set(ghost.id, ghost.toPlainObj());
-            this.ghostsLocal.set(ghost.id, ghost);
-        }
-        getGhosts() {
-            return this.ghostsLocal.values();
-        }
-        updateDotsLocal() {
-            for (let dot of this.dotsLocal.values()) {
-                let pacmanId = this.dotsShared.get(dot.id);
-                dot.pacmanId = pacmanId;
-                // Dot assigned to a pacman
-                if (pacmanId != Dot.DOT_NONE_PACMAN && pacmanId != undefined) {
-                    dot.setVisible(false);
-                }
-                else {
-                    dot.setVisible(true);
-                }
-            }
-        }
-        initDot(dot) {
-            let pacmanId = this.dotsShared.get(dot.id);
-            if (pacmanId == null) {
-                this.dotsShared.set(dot.id, dot.pacmanId);
-                this.dotsLocal.set(dot.id, dot);
-                // Add to map
-                let x = dot.getPosition().x;
-                let y = dot.getPosition().y;
-                if (!this.dotsMap.hasOwnProperty(y)) {
-                    this.dotsMap[y] = {};
-                }
-                this.dotsMap[y][x] = dot;
-            }
-        }
-        setDot(dot) {
-            if (dot.pacmanId != Dot.DOT_NONE_PACMAN) {
-                this.dotsShared.set(dot.id, dot.pacmanId);
-                this.dotsLocal.set(dot.id, dot);
-            }
-        }
-        getDots() {
-            return this.dotsLocal.values();
-        }
-        getDot(x, y) {
-            try {
-                return this.dotsMap[y][x];
-            }
-            catch (e) {
-                console.log(e);
-                return null;
-            }
-        }
-    }
-
-    /* src\App.svelte generated by Svelte v3.44.3 */
+    /* src\pages\App.svelte generated by Svelte v3.44.3 */
 
     const { console: console_1 } = globals;
-    const file = "src\\App.svelte";
 
-    function create_fragment(ctx) {
-    	let div;
+    // (13:0) {#if $pacmanName != ""}
+    function create_if_block(ctx) {
+    	let game;
+    	let current;
+
+    	game = new Game_1({
+    			props: {
+    				ydoc: /*ydoc*/ ctx[2],
+    				provider: /*provider*/ ctx[0]
+    			},
+    			$$inline: true
+    		});
 
     	const block = {
     		c: function create() {
-    			div = element("div");
-    			attr_dev(div, "class", "init svelte-3ssu1j");
-    			add_location(div, file, 56, 0, 1707);
+    			create_component(game.$$.fragment);
+    		},
+    		m: function mount(target, anchor) {
+    			mount_component(game, target, anchor);
+    			current = true;
+    		},
+    		p: function update(ctx, dirty) {
+    			const game_changes = {};
+    			if (dirty & /*provider*/ 1) game_changes.provider = /*provider*/ ctx[0];
+    			game.$set(game_changes);
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(game.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(game.$$.fragment, local);
+    			current = false;
+    		},
+    		d: function destroy(detaching) {
+    			destroy_component(game, detaching);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block.name,
+    		type: "if",
+    		source: "(13:0) {#if $pacmanName != \\\"\\\"}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function create_fragment(ctx) {
+    	let t;
+    	let menu;
+    	let current;
+    	let if_block = /*$pacmanName*/ ctx[1] != "" && create_if_block(ctx);
+
+    	menu = new Menu({
+    			props: {
+    				ydoc: /*ydoc*/ ctx[2],
+    				provider: /*provider*/ ctx[0]
+    			},
+    			$$inline: true
+    		});
+
+    	const block = {
+    		c: function create() {
+    			if (if_block) if_block.c();
+    			t = space();
+    			create_component(menu.$$.fragment);
     		},
     		l: function claim(nodes) {
     			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
     		},
     		m: function mount(target, anchor) {
-    			insert_dev(target, div, anchor);
+    			if (if_block) if_block.m(target, anchor);
+    			insert_dev(target, t, anchor);
+    			mount_component(menu, target, anchor);
+    			current = true;
     		},
-    		p: noop,
-    		i: noop,
-    		o: noop,
+    		p: function update(ctx, [dirty]) {
+    			if (/*$pacmanName*/ ctx[1] != "") {
+    				if (if_block) {
+    					if_block.p(ctx, dirty);
+
+    					if (dirty & /*$pacmanName*/ 2) {
+    						transition_in(if_block, 1);
+    					}
+    				} else {
+    					if_block = create_if_block(ctx);
+    					if_block.c();
+    					transition_in(if_block, 1);
+    					if_block.m(t.parentNode, t);
+    				}
+    			} else if (if_block) {
+    				group_outros();
+
+    				transition_out(if_block, 1, 1, () => {
+    					if_block = null;
+    				});
+
+    				check_outros();
+    			}
+
+    			const menu_changes = {};
+    			if (dirty & /*provider*/ 1) menu_changes.provider = /*provider*/ ctx[0];
+    			menu.$set(menu_changes);
+    		},
+    		i: function intro(local) {
+    			if (current) return;
+    			transition_in(if_block);
+    			transition_in(menu.$$.fragment, local);
+    			current = true;
+    		},
+    		o: function outro(local) {
+    			transition_out(if_block);
+    			transition_out(menu.$$.fragment, local);
+    			current = false;
+    		},
     		d: function destroy(detaching) {
-    			if (detaching) detach_dev(div);
+    			if (if_block) if_block.d(detaching);
+    			if (detaching) detach_dev(t);
+    			destroy_component(menu, detaching);
     		}
     	};
 
@@ -56027,66 +58526,18 @@ var app = (function () {
     	return block;
     }
 
+    const version = "version 0.0.4";
+
     function instance($$self, $$props, $$invalidate) {
+    	let $pacmanName;
+    	validate_store(pacmanName, 'pacmanName');
+    	component_subscribe($$self, pacmanName, $$value => $$invalidate(1, $pacmanName = $$value));
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('App', slots, []);
-    	console.log("version 0.0.4");
-    	let game = new Game();
-    	let keys = new KeyState();
-    	let renderer = game.createRenderer();
-    	let scene = game.createScene();
-    	let state = new GameState(scene);
-    	let map = new LevelMap(scene, state);
-    	let camera = new Camera();
-    	let pacman = new Pacman(Date.now().toString(), map.pacmanSpawn);
-    	pacman.addToScene(scene);
-
-    	//let hudCamera = game.createHudCamera(map)
-    	let remove = [];
-
-    	let frameCounter = 0;
-
-    	// Main game loop
-    	game.gameLoop(delta => {
-    		// Update local list of pacman
-    		state.updatePacmanLocal(pacman.id);
-
-    		state.updateDotsLocal();
-    		pacman.movePacman(delta, keys, map, state);
-    		pacman.updateFrame();
-    		camera.updateCamera(delta, pacman);
-
-    		// Set my pacman state
-    		state.setPacman(pacman);
-
-    		// Update other pacman frames
-    		for (let p of state.getPacmans()) {
-    			if (p.id != pacman.id) {
-    				p.updateFrame();
-    			} //p.calculateFakeMovement(delta)
-    		}
-
-    		// Render main view
-    		renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
-
-    		renderer.render(scene, camera.get());
-
-    		// Render HUD
-    		//renderHud(renderer, hudCamera, scene)
-    		frameCounter++;
-    	});
-
-    	setInterval(
-    		() => {
-    			
-    		},
-    		//state.updatePacmanState()
-    		300
-    	); //console.log(state.getPacmans())
-    	//state.setPacman(pacman)
-    	//console.log(state.getPacmans())
-    	//state.setPacman(pacman)
-
+    	console.log(version);
+    	const ydoc = new Doc({ gc: true });
+    	const provider = new WebrtcProvider('distribuited-pacman', ydoc);
+    	provider.maxConns = 10;
     	const writable_props = [];
 
     	Object.keys($$props).forEach(key => {
@@ -56094,42 +58545,18 @@ var app = (function () {
     	});
 
     	$$self.$capture_state = () => ({
-    		Camera,
-    		Game,
-    		KeyState,
-    		LevelMap,
-    		Pacman,
-    		GameState,
-    		game,
-    		keys,
-    		renderer,
-    		scene,
-    		state,
-    		map,
-    		camera,
-    		pacman,
-    		remove,
-    		frameCounter
+    		Menu,
+    		Game: Game_1,
+    		WebrtcProvider,
+    		Y,
+    		pacmanName,
+    		version,
+    		ydoc,
+    		provider,
+    		$pacmanName
     	});
 
-    	$$self.$inject_state = $$props => {
-    		if ('game' in $$props) game = $$props.game;
-    		if ('keys' in $$props) keys = $$props.keys;
-    		if ('renderer' in $$props) renderer = $$props.renderer;
-    		if ('scene' in $$props) scene = $$props.scene;
-    		if ('state' in $$props) state = $$props.state;
-    		if ('map' in $$props) map = $$props.map;
-    		if ('camera' in $$props) camera = $$props.camera;
-    		if ('pacman' in $$props) pacman = $$props.pacman;
-    		if ('remove' in $$props) remove = $$props.remove;
-    		if ('frameCounter' in $$props) frameCounter = $$props.frameCounter;
-    	};
-
-    	if ($$props && "$$inject" in $$props) {
-    		$$self.$inject_state($$props.$$inject);
-    	}
-
-    	return [];
+    	return [provider, $pacmanName, ydoc];
     }
 
     class App extends SvelteComponentDev {
