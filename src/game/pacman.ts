@@ -1,0 +1,225 @@
+import * as THREE from "three"
+import { AbstractType } from "yjs"
+import type { KeyState } from "./key_state"
+import type { LevelMap } from "./level_map"
+import type { GameState } from "./state"
+import { Utils } from "./utils"
+//import * as TWEEN from "@tweenjs/tween.js"
+
+
+export class Pacman extends AbstractType<any>{
+    static readonly PACMAN_SPEED = 2
+    static readonly PACMAN_RADIUS = 0.4
+
+    static readonly PACMAN_ONLINE_MATERIAL = new THREE.MeshPhongMaterial({ color: 'yellow', side: THREE.DoubleSide })
+    static readonly PACMAN_OFFLINE_MATERIAL = new THREE.MeshPhongMaterial({ color: 'gray', side: THREE.DoubleSide })
+
+    public id: string
+    public name: string
+    public peerId: string
+
+    // true if the player press start button
+    public isPlaying: boolean
+    // true if the player has tab open
+    public isOnline: boolean
+
+    private mesh: THREE.Mesh
+    private frames: Array<THREE.SphereGeometry>
+    // public color
+
+    private distanceMoved: number
+    private lastDistanceMoved: number
+    public direction: THREE.Vector3
+    public isMoving: boolean
+    public frameCounter: number
+    public deletedFlag: number = 0
+
+    constructor(id: string, name: string, peerId: string, position: THREE.Vector3) {
+        super()
+        // Create spheres with decreasingly small horizontal sweeps, in order
+        // to create pacman "death" animation.
+        let pacmanGeometries = new Array<THREE.SphereGeometry>()
+        let numFrames = 40
+        for (let i = 0; i < numFrames; i++) {
+            let offset = (i / (numFrames - 1)) * Math.PI
+            pacmanGeometries.push(new THREE.SphereGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2))
+            pacmanGeometries[i].rotateX(Math.PI / 2)
+        }
+
+        let pacmanMaterial = Pacman.PACMAN_ONLINE_MATERIAL
+
+        this.mesh = new THREE.Mesh(pacmanGeometries[0], pacmanMaterial)
+        this.frames = pacmanGeometries
+
+        this.distanceMoved = 0
+        this.lastDistanceMoved = 0
+
+        // Initialize pacman facing to the left.
+        this.mesh.position.copy(position)
+        this.direction = new THREE.Vector3(-1, 0, 0)
+
+        this.id = id
+        this.name = name
+        this.isPlaying = false
+        this.isOnline = true
+        this.peerId = peerId
+        
+        this.frameCounter = 0
+        this.isMoving = false
+    }
+
+    // Update pacman mesh simulating the eat movement
+    public updateFrame() {
+        // Show eating animation based on how much pacman has moved.
+        let maxAngle = Math.PI / 4
+        let angle = (this.distanceMoved * 2) % (maxAngle * 2)
+        if (angle > maxAngle)
+            angle = maxAngle * 2 - angle
+        let frame = Math.floor(angle / Math.PI * this.frames.length)
+    
+        this.mesh.geometry = this.frames[frame]
+
+        // Update rotation based on direction so that mouth is always facing forward.
+        // The "mouth" part is on the side of the sphere, make it "look" up but
+        // set the up direction so that it points forward.
+        this.mesh.up.copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2)
+        this.mesh.lookAt((new THREE.Vector3()).copy(this.mesh.position).add(Utils.UP))
+
+        if(!this.isOnline){
+            this.mesh.material = Pacman.PACMAN_OFFLINE_MATERIAL
+        }
+    }
+
+    // Used to predict movement of other players to avoid glitch due to poor connection
+    public calculateFakeMovement(delta: number) {
+        if( this.isMoving && this.lastDistanceMoved == this.distanceMoved ){
+            console.log("calc fake")
+            this.mesh.translateOnAxis(this.direction, Pacman.PACMAN_SPEED * delta)
+            this.distanceMoved += Pacman.PACMAN_SPEED * delta
+        }
+        this.lastDistanceMoved = this.distanceMoved
+    }
+
+    // Elaborate key pressed and change pacman position
+    public movePacman(delta: number, keys: KeyState, levelMap: LevelMap, state: GameState) {
+    
+        this.isMoving = false
+        // Move based on current keys being pressed.
+        if (keys.getKeyState('KeyW') || keys.getKeyState('ArrowUp')) {
+            // W - move forward
+            //pacman.translateOnAxis(pacman.direction, PACMAN_SPEED * delta)
+            // Because we are rotating the object above using lookAt, "forward" is to the left.
+            this.mesh.translateOnAxis(Utils.LEFT, Pacman.PACMAN_SPEED * delta)
+            this.distanceMoved += Pacman.PACMAN_SPEED * delta
+            this.isMoving = true
+        }
+        if (keys.getKeyState('KeyA') || keys.getKeyState('ArrowLeft')) {
+            // A - rotate left
+            this.direction.applyAxisAngle(Utils.UP, Math.PI / 2 * delta)
+        }
+        if (keys.getKeyState('KeyD') || keys.getKeyState('ArrowRight')) {
+            // D - rotate right
+            this.direction.applyAxisAngle(Utils.UP, -Math.PI / 2 * delta)
+        }
+        if (keys.getKeyState('KeyS') || keys.getKeyState('ArrowDown')) {
+            // S - move backward
+            this.mesh.translateOnAxis(Utils.LEFT, -Pacman.PACMAN_SPEED * delta)
+            this.distanceMoved += Pacman.PACMAN_SPEED * delta
+            this.isMoving = true
+        }
+
+        // Check for collision with walls
+        let leftSide = this.mesh.position.clone().addScaledVector(Utils.LEFT, Pacman.PACMAN_RADIUS).round()
+        let topSide = this.mesh.position.clone().addScaledVector(Utils.TOP, Pacman.PACMAN_RADIUS).round()
+        let rightSide = this.mesh.position.clone().addScaledVector(Utils.RIGHT, Pacman.PACMAN_RADIUS).round()
+        let bottomSide = this.mesh.position.clone().addScaledVector(Utils.BOTTOM, Pacman.PACMAN_RADIUS).round()
+        if (levelMap.isWall(leftSide)) {
+            this.mesh.position.x = leftSide.x + 0.5 + Pacman.PACMAN_RADIUS
+        }
+        if (levelMap.isWall(rightSide)) {
+            this.mesh.position.x = rightSide.x - 0.5 - Pacman.PACMAN_RADIUS
+        }
+        if (levelMap.isWall(topSide)) {
+            this.mesh.position.y = topSide.y - 0.5 - Pacman.PACMAN_RADIUS
+        }
+        if (levelMap.isWall(bottomSide)) {
+            this.mesh.position.y = bottomSide.y + 0.5 + Pacman.PACMAN_RADIUS
+        }
+    
+        let cell = levelMap.getAt(this.mesh.position)
+    
+        // Make pacman eat dots.
+        /*if (cell && cell.isDot === true && cell.visible === true) {
+            levelMap.removeAt(this.mesh.position)
+            //this.numDotsEaten += 1
+        }*/
+
+        let x = Math.round(this.mesh.position.x), y = Math.round(this.mesh.position.y)
+        let dot = state.getDot(x, y)
+        if(dot != null){
+            dot.pacmanId = this.id
+            state.updateDotShared(dot)
+        }
+    
+        // Make pacman eat power pellets.
+        //this.atePellet = false
+        if (cell && cell.isPowerPellet === true && cell.visible === true) {
+            levelMap.removeAt(this.mesh.position)
+            //this.atePellet = true
+    
+            //killSound.play()
+        }
+    }
+
+    // Get pacman position
+    public getPosition(): THREE.Vector3 {
+        return this.mesh.position
+    }
+
+    // Add mesh to 3d scene
+    public addToScene(scene: THREE.Scene) {
+        scene.add(this.mesh)
+    }
+
+    // Get plain js object
+    public toPlainObj(): Object {
+        let obj: any = {}
+        obj["id"] = this.id
+        obj["name"] = this.name
+        obj["peerId"] = this.peerId
+        obj["position"] = [ this.mesh.position.x, this.mesh.position.y, this.mesh.position.z]
+        obj["direction"] = [ this.direction.x, this.direction.y, this.direction.z]
+        obj["distanceMoved"] = this.distanceMoved
+        obj["isMoving"] = this.isMoving
+        obj["isPlaying"] = this.isPlaying
+        obj["isOnline"] = this.isOnline
+        return obj
+    }
+
+    // New pacman from plain js object
+    public static fromObj(obj: any): Pacman {
+        let position = new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2])
+        let out = new Pacman(obj["id"], obj["name"], obj["peerId"], position)
+        out.copyObj(obj)
+        return out
+    }
+
+    // Copy from a js plain object
+    public copyObj(obj: any) {    
+        this.mesh.position.copy(new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2]))
+        this.direction.copy(new THREE.Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]))
+        this.distanceMoved = obj["distanceMoved"]
+        this.isMoving = obj["isMoving"]
+        this.isPlaying = obj["isPlaying"]
+        this.isOnline = obj["isOnline"]
+    }
+
+    // Copy object if it has the same id
+    public copyObjIfSameId(obj: any): boolean{
+        if(obj["id"] == this.id){
+            this.copyObj(obj)
+            return true
+        }
+        return false
+    }
+}
