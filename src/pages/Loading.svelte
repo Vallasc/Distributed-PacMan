@@ -105,22 +105,22 @@
         overflow: hidden;
         margin: 0;
         width: 100%;
-        height: 120px;
+        height: 70px;
         top: 50%;
         z-index: 10;
-        border-bottom:solid 5px blue;
-        border-top:solid 5px blue;
+        border-bottom:solid 4px blue;
+        border-top:solid 4px blue;
     }
     .box .pacman:before,
     .box .pacman:after {
         content: "";
         position: absolute;
         background: #ffc107;
-        width: 100px;
-        height: 50px;
-        left: 50%;
-        top: 50%;
-        margin-left: -50px;
+        width: 60px;
+        height: 30px;
+        left: 40%;
+        top: 80%;
+        margin-left: -15px;
         margin-top: -50px;
         border-radius: 50px 50px 0 0;
         -webkit-animation: up 0.4s infinite;
@@ -130,7 +130,7 @@
         z-index: 12;
     }
     .box .pacman:after {
-        margin-top: -1px;
+        margin-top: -21px;
         border-radius: 0 0 50px 50px;
         -webkit-animation: down 0.4s infinite;
         -moz-animation: down 0.4s infinite;
@@ -140,15 +140,15 @@
 
     .box .dot {
         position: absolute;
-        left: 50%;
+        left: 40%;
         top: 50%;
-        width: 20px;
-        height: 20px;
-        margin-top: -5px;
-        margin-left: 50px;
+        width: 15px;
+        height: 15px;
+        margin-top: -7px;
+        margin-left: 70px;
         border-radius: 50%;
         background: #ccc;
-        box-shadow: 50px 0 0 #ccc, 100px 0 0 #ccc, 150px 0 0 #ccc, 200px 0 0 #ccc, 250px 0 0 #ccc;
+        box-shadow: 70px 0 0 #ccc, 140px 0 0 #ccc, 210px 0 0 #ccc, 280px 0 0 #ccc;
         -webkit-animation: r-to-l 0.4s infinite;
         -moz-animation: r-to-l 0.4s infinite;
         -o-animation: r-to-l 0.4s infinite;

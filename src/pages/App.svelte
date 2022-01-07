@@ -1,11 +1,11 @@
 <script lang="ts">
-	import Menu from './Menu.svelte';
-	import Game  from './Game.svelte';
+	import Menu from './Menu.svelte'
+	import Game  from './Game.svelte'
 	import { WebrtcProvider } from 'y-webrtc'
 	import * as Y from 'yjs'
-    import { pacmanName } from '../store.js';
+    import { pacmanName } from '../store.js'
 
-	const version = "version 0.0.4"
+	const version = "version 0.1.4"
 
 	console.log(version)
 

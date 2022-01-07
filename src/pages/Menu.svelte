@@ -1,10 +1,10 @@
 <script lang="ts">
     import type * as Y from 'yjs'
-    import { slide } from 'svelte/transition';
-    import { quintInOut } from 'svelte/easing';
-    import { pacmanName, pacmanId, globalState } from '../store.js';
-    import { Utils } from '../game/utils.js';
-    import type { Pacman } from '../game/pacman.js';
+    import { slide } from 'svelte/transition'
+    import { quintInOut } from 'svelte/easing'
+    import { pacmanName, pacmanId, globalState } from '../store.js'
+    import { Utils } from '../game/utils.js'
+    import type { Pacman } from '../game/pacman.js'
     import Loading from './Loading.svelte'
     import type { WebrtcProvider } from 'y-webrtc'
 
@@ -57,7 +57,7 @@
     function updatePacmanList(){
         interval = setInterval(() => {
             if($globalState != null){
-                pacmanList = Array.from($globalState.getPacmans())
+                pacmanList = Array.from($globalState.getPacmansList())
                 pacmanList = pacmanList // for svelte reactivity
             }
         }, 200)
@@ -97,16 +97,19 @@
             <form class="nick-insert" on:submit={handleSubmitName}>
                 <input type="text" maxlength="10" minlength="2" bind:value={pName}/>
                 <div style="width:10px;"/>
-                <button class="game-start" >Go</button>
+                <button class="game-start" >GO</button>
             </form>
         {:else if pressStart}
-            <button on:click={()=>{startGame()}} class="game-start">Start game</button>
+            <div style="height:20px;"/>
+            <button on:click={()=>{startGame()}} class="game-start">START GAME</button>
+            <div style="height:30px;"/>
             <h1>Players</h1>
             <div class="pacman-list">
                 {#each pacmanList as pacman}
                     <div class="pacman-name">
-                        {pacman.name}
+                        • {pacman.name}
                         {#if $pacmanId == pacman.id}(YOU){/if}
+                        {#if $pacmanId == pacman.id}{provider.room.peerId}(PEERID){/if}
                     </div>
                 {/each}
             </div>
@@ -133,7 +136,7 @@
 
     .init img {
         margin-top: 20px;
-        width: clamp(300px, 40%, 700px);
+        width: clamp(200px, 40%, 700px);
     }
 
     .pacman-list {
@@ -148,8 +151,8 @@
     }
 
     .pacman-name {
-        margin-top: 8px;
-        margin-bottom: 8px;
+        margin-top: 10px;
+        margin-bottom: 10px;
         text-align: center;
         font-size: clamp(12px, 2vw, 26px);
     }
@@ -176,9 +179,9 @@
 
     input[type=text] {
         width: clamp(300px, 40%, 700px);
-        padding: 18px;
+        padding: 16px;
         display: inline-block;
-        border: 3px solid #000;
+        border: 4px solid rgba(0, 0, 0, 0.534);
         border-radius: 10px;
         background-color: transparent;
         box-sizing: border-box;
