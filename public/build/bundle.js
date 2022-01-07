@@ -41445,6 +41445,294 @@ var app = (function () {
 
     }
 
+    class ShapePath {
+
+    	constructor() {
+
+    		this.type = 'ShapePath';
+
+    		this.color = new Color();
+
+    		this.subPaths = [];
+    		this.currentPath = null;
+
+    	}
+
+    	moveTo( x, y ) {
+
+    		this.currentPath = new Path();
+    		this.subPaths.push( this.currentPath );
+    		this.currentPath.moveTo( x, y );
+
+    		return this;
+
+    	}
+
+    	lineTo( x, y ) {
+
+    		this.currentPath.lineTo( x, y );
+
+    		return this;
+
+    	}
+
+    	quadraticCurveTo( aCPx, aCPy, aX, aY ) {
+
+    		this.currentPath.quadraticCurveTo( aCPx, aCPy, aX, aY );
+
+    		return this;
+
+    	}
+
+    	bezierCurveTo( aCP1x, aCP1y, aCP2x, aCP2y, aX, aY ) {
+
+    		this.currentPath.bezierCurveTo( aCP1x, aCP1y, aCP2x, aCP2y, aX, aY );
+
+    		return this;
+
+    	}
+
+    	splineThru( pts ) {
+
+    		this.currentPath.splineThru( pts );
+
+    		return this;
+
+    	}
+
+    	toShapes( isCCW, noHoles ) {
+
+    		function toShapesNoHoles( inSubpaths ) {
+
+    			const shapes = [];
+
+    			for ( let i = 0, l = inSubpaths.length; i < l; i ++ ) {
+
+    				const tmpPath = inSubpaths[ i ];
+
+    				const tmpShape = new Shape();
+    				tmpShape.curves = tmpPath.curves;
+
+    				shapes.push( tmpShape );
+
+    			}
+
+    			return shapes;
+
+    		}
+
+    		function isPointInsidePolygon( inPt, inPolygon ) {
+
+    			const polyLen = inPolygon.length;
+
+    			// inPt on polygon contour => immediate success    or
+    			// toggling of inside/outside at every single! intersection point of an edge
+    			//  with the horizontal line through inPt, left of inPt
+    			//  not counting lowerY endpoints of edges and whole edges on that line
+    			let inside = false;
+    			for ( let p = polyLen - 1, q = 0; q < polyLen; p = q ++ ) {
+
+    				let edgeLowPt = inPolygon[ p ];
+    				let edgeHighPt = inPolygon[ q ];
+
+    				let edgeDx = edgeHighPt.x - edgeLowPt.x;
+    				let edgeDy = edgeHighPt.y - edgeLowPt.y;
+
+    				if ( Math.abs( edgeDy ) > Number.EPSILON ) {
+
+    					// not parallel
+    					if ( edgeDy < 0 ) {
+
+    						edgeLowPt = inPolygon[ q ]; edgeDx = - edgeDx;
+    						edgeHighPt = inPolygon[ p ]; edgeDy = - edgeDy;
+
+    					}
+
+    					if ( ( inPt.y < edgeLowPt.y ) || ( inPt.y > edgeHighPt.y ) ) 		continue;
+
+    					if ( inPt.y === edgeLowPt.y ) {
+
+    						if ( inPt.x === edgeLowPt.x )		return	true;		// inPt is on contour ?
+    						// continue;				// no intersection or edgeLowPt => doesn't count !!!
+
+    					} else {
+
+    						const perpEdge = edgeDy * ( inPt.x - edgeLowPt.x ) - edgeDx * ( inPt.y - edgeLowPt.y );
+    						if ( perpEdge === 0 )				return	true;		// inPt is on contour ?
+    						if ( perpEdge < 0 ) 				continue;
+    						inside = ! inside;		// true intersection left of inPt
+
+    					}
+
+    				} else {
+
+    					// parallel or collinear
+    					if ( inPt.y !== edgeLowPt.y ) 		continue;			// parallel
+    					// edge lies on the same horizontal line as inPt
+    					if ( ( ( edgeHighPt.x <= inPt.x ) && ( inPt.x <= edgeLowPt.x ) ) ||
+    						 ( ( edgeLowPt.x <= inPt.x ) && ( inPt.x <= edgeHighPt.x ) ) )		return	true;	// inPt: Point on contour !
+    					// continue;
+
+    				}
+
+    			}
+
+    			return	inside;
+
+    		}
+
+    		const isClockWise = ShapeUtils.isClockWise;
+
+    		const subPaths = this.subPaths;
+    		if ( subPaths.length === 0 ) return [];
+
+    		if ( noHoles === true )	return	toShapesNoHoles( subPaths );
+
+
+    		let solid, tmpPath, tmpShape;
+    		const shapes = [];
+
+    		if ( subPaths.length === 1 ) {
+
+    			tmpPath = subPaths[ 0 ];
+    			tmpShape = new Shape();
+    			tmpShape.curves = tmpPath.curves;
+    			shapes.push( tmpShape );
+    			return shapes;
+
+    		}
+
+    		let holesFirst = ! isClockWise( subPaths[ 0 ].getPoints() );
+    		holesFirst = isCCW ? ! holesFirst : holesFirst;
+
+    		// console.log("Holes first", holesFirst);
+
+    		const betterShapeHoles = [];
+    		const newShapes = [];
+    		let newShapeHoles = [];
+    		let mainIdx = 0;
+    		let tmpPoints;
+
+    		newShapes[ mainIdx ] = undefined;
+    		newShapeHoles[ mainIdx ] = [];
+
+    		for ( let i = 0, l = subPaths.length; i < l; i ++ ) {
+
+    			tmpPath = subPaths[ i ];
+    			tmpPoints = tmpPath.getPoints();
+    			solid = isClockWise( tmpPoints );
+    			solid = isCCW ? ! solid : solid;
+
+    			if ( solid ) {
+
+    				if ( ( ! holesFirst ) && ( newShapes[ mainIdx ] ) )	mainIdx ++;
+
+    				newShapes[ mainIdx ] = { s: new Shape(), p: tmpPoints };
+    				newShapes[ mainIdx ].s.curves = tmpPath.curves;
+
+    				if ( holesFirst )	mainIdx ++;
+    				newShapeHoles[ mainIdx ] = [];
+
+    				//console.log('cw', i);
+
+    			} else {
+
+    				newShapeHoles[ mainIdx ].push( { h: tmpPath, p: tmpPoints[ 0 ] } );
+
+    				//console.log('ccw', i);
+
+    			}
+
+    		}
+
+    		// only Holes? -> probably all Shapes with wrong orientation
+    		if ( ! newShapes[ 0 ] )	return	toShapesNoHoles( subPaths );
+
+
+    		if ( newShapes.length > 1 ) {
+
+    			let ambiguous = false;
+    			const toChange = [];
+
+    			for ( let sIdx = 0, sLen = newShapes.length; sIdx < sLen; sIdx ++ ) {
+
+    				betterShapeHoles[ sIdx ] = [];
+
+    			}
+
+    			for ( let sIdx = 0, sLen = newShapes.length; sIdx < sLen; sIdx ++ ) {
+
+    				const sho = newShapeHoles[ sIdx ];
+
+    				for ( let hIdx = 0; hIdx < sho.length; hIdx ++ ) {
+
+    					const ho = sho[ hIdx ];
+    					let hole_unassigned = true;
+
+    					for ( let s2Idx = 0; s2Idx < newShapes.length; s2Idx ++ ) {
+
+    						if ( isPointInsidePolygon( ho.p, newShapes[ s2Idx ].p ) ) {
+
+    							if ( sIdx !== s2Idx )	toChange.push( { froms: sIdx, tos: s2Idx, hole: hIdx } );
+    							if ( hole_unassigned ) {
+
+    								hole_unassigned = false;
+    								betterShapeHoles[ s2Idx ].push( ho );
+
+    							} else {
+
+    								ambiguous = true;
+
+    							}
+
+    						}
+
+    					}
+
+    					if ( hole_unassigned ) {
+
+    						betterShapeHoles[ sIdx ].push( ho );
+
+    					}
+
+    				}
+
+    			}
+    			// console.log("ambiguous: ", ambiguous);
+
+    			if ( toChange.length > 0 ) {
+
+    				// console.log("to change: ", toChange);
+    				if ( ! ambiguous )	newShapeHoles = betterShapeHoles;
+
+    			}
+
+    		}
+
+    		let tmpHoles;
+
+    		for ( let i = 0, il = newShapes.length; i < il; i ++ ) {
+
+    			tmpShape = newShapes[ i ].s;
+    			shapes.push( tmpShape );
+    			tmpHoles = newShapeHoles[ i ];
+
+    			for ( let j = 0, jl = tmpHoles.length; j < jl; j ++ ) {
+
+    				tmpShape.holes.push( tmpHoles[ j ].h );
+
+    			}
+
+    		}
+
+    		//console.log("shape", shapes);
+
+    		return shapes;
+
+    	}
+
+    }
+
     const _floatView = new Float32Array( 1 );
     new Int32Array( _floatView.buffer );
 
@@ -43049,11 +43337,11 @@ var app = (function () {
     			div0 = element("div");
     			t = space();
     			div1 = element("div");
-    			attr_dev(div0, "class", "pacman svelte-1rnv3hr");
+    			attr_dev(div0, "class", "pacman svelte-1f8f04");
     			add_location(div0, file$1, 3, 4, 54);
-    			attr_dev(div1, "class", "dot svelte-1rnv3hr");
+    			attr_dev(div1, "class", "dot svelte-1f8f04");
     			add_location(div1, file$1, 4, 4, 82);
-    			attr_dev(div2, "class", "box svelte-1rnv3hr");
+    			attr_dev(div2, "class", "box svelte-1f8f04");
     			add_location(div2, file$1, 2, 0, 31);
     		},
     		l: function claim(nodes) {
@@ -43133,9 +43421,9 @@ var app = (function () {
     	const if_blocks = [];
 
     	function select_block_type(ctx, dirty) {
-    		if (/*errorGameStarted*/ ctx[3]) return 0;
-    		if (/*insertName*/ ctx[1]) return 1;
-    		if (/*pressStart*/ ctx[2]) return 2;
+    		if (/*errorGameStarted*/ ctx[4]) return 0;
+    		if (/*insertName*/ ctx[2]) return 1;
+    		if (/*pressStart*/ ctx[3]) return 2;
     		return 3;
     	}
 
@@ -43150,10 +43438,10 @@ var app = (function () {
     			if_block.c();
     			if (!src_url_equal(img.src, img_src_value = "./img/pacman_logo.png")) attr_dev(img, "src", img_src_value);
     			attr_dev(img, "alt", "pacman logo");
-    			attr_dev(img, "class", "svelte-1wb55tw");
-    			add_location(img, file, 75, 8, 2123);
-    			attr_dev(div, "class", "init svelte-1wb55tw");
-    			add_location(div, file, 74, 4, 2027);
+    			attr_dev(img, "class", "svelte-1u5keby");
+    			add_location(img, file, 75, 8, 2127);
+    			attr_dev(div, "class", "init svelte-1u5keby");
+    			add_location(div, file, 74, 4, 2031);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -43246,7 +43534,7 @@ var app = (function () {
     	return block;
     }
 
-    // (100:8) {:else}
+    // (103:8) {:else}
     function create_else_block(ctx) {
     	let div;
     	let t0;
@@ -43265,9 +43553,9 @@ var app = (function () {
     			t2 = space();
     			create_component(loading.$$.fragment);
     			set_style(div, "height", "50px");
-    			add_location(div, file, 100, 12, 3210);
-    			attr_dev(h1, "class", "svelte-1wb55tw");
-    			add_location(h1, file, 101, 12, 3251);
+    			add_location(div, file, 103, 12, 3387);
+    			attr_dev(h1, "class", "svelte-1u5keby");
+    			add_location(h1, file, 104, 12, 3428);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -43300,7 +43588,7 @@ var app = (function () {
     		block,
     		id: create_else_block.name,
     		type: "else",
-    		source: "(100:8) {:else}",
+    		source: "(103:8) {:else}",
     		ctx
     	});
 
@@ -43309,14 +43597,18 @@ var app = (function () {
 
     // (89:29) 
     function create_if_block_3(ctx) {
+    	let div0;
+    	let t0;
     	let button;
-    	let t1;
-    	let h1;
+    	let t2;
+    	let div1;
     	let t3;
-    	let div;
+    	let h1;
+    	let t5;
+    	let div2;
     	let mounted;
     	let dispose;
-    	let each_value = /*pacmanList*/ ctx[5];
+    	let each_value = /*pacmanList*/ ctx[6];
     	validate_each_argument(each_value);
     	let each_blocks = [];
 
@@ -43326,34 +43618,46 @@ var app = (function () {
 
     	const block = {
     		c: function create() {
+    			div0 = element("div");
+    			t0 = space();
     			button = element("button");
-    			button.textContent = "Start game";
-    			t1 = space();
+    			button.textContent = "START GAME";
+    			t2 = space();
+    			div1 = element("div");
+    			t3 = space();
     			h1 = element("h1");
     			h1.textContent = "Players";
-    			t3 = space();
-    			div = element("div");
+    			t5 = space();
+    			div2 = element("div");
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
     				each_blocks[i].c();
     			}
 
-    			attr_dev(button, "class", "game-start svelte-1wb55tw");
-    			add_location(button, file, 89, 12, 2766);
-    			attr_dev(h1, "class", "svelte-1wb55tw");
-    			add_location(h1, file, 90, 12, 2855);
-    			attr_dev(div, "class", "pacman-list svelte-1wb55tw");
-    			add_location(div, file, 91, 12, 2885);
+    			set_style(div0, "height", "20px");
+    			add_location(div0, file, 89, 12, 2770);
+    			attr_dev(button, "class", "game-start svelte-1u5keby");
+    			add_location(button, file, 90, 12, 2811);
+    			set_style(div1, "height", "30px");
+    			add_location(div1, file, 91, 12, 2900);
+    			attr_dev(h1, "class", "svelte-1u5keby");
+    			add_location(h1, file, 92, 12, 2941);
+    			attr_dev(div2, "class", "pacman-list svelte-1u5keby");
+    			add_location(div2, file, 93, 12, 2971);
     		},
     		m: function mount(target, anchor) {
+    			insert_dev(target, div0, anchor);
+    			insert_dev(target, t0, anchor);
     			insert_dev(target, button, anchor);
-    			insert_dev(target, t1, anchor);
-    			insert_dev(target, h1, anchor);
+    			insert_dev(target, t2, anchor);
+    			insert_dev(target, div1, anchor);
     			insert_dev(target, t3, anchor);
-    			insert_dev(target, div, anchor);
+    			insert_dev(target, h1, anchor);
+    			insert_dev(target, t5, anchor);
+    			insert_dev(target, div2, anchor);
 
     			for (let i = 0; i < each_blocks.length; i += 1) {
-    				each_blocks[i].m(div, null);
+    				each_blocks[i].m(div2, null);
     			}
 
     			if (!mounted) {
@@ -43362,8 +43666,8 @@ var app = (function () {
     			}
     		},
     		p: function update(ctx, dirty) {
-    			if (dirty & /*$pacmanId, pacmanList*/ 96) {
-    				each_value = /*pacmanList*/ ctx[5];
+    			if (dirty & /*provider, $pacmanId, pacmanList*/ 193) {
+    				each_value = /*pacmanList*/ ctx[6];
     				validate_each_argument(each_value);
     				let i;
 
@@ -43375,7 +43679,7 @@ var app = (function () {
     					} else {
     						each_blocks[i] = create_each_block(child_ctx);
     						each_blocks[i].c();
-    						each_blocks[i].m(div, null);
+    						each_blocks[i].m(div2, null);
     					}
     				}
 
@@ -43389,11 +43693,15 @@ var app = (function () {
     		i: noop,
     		o: noop,
     		d: function destroy(detaching) {
+    			if (detaching) detach_dev(div0);
+    			if (detaching) detach_dev(t0);
     			if (detaching) detach_dev(button);
-    			if (detaching) detach_dev(t1);
-    			if (detaching) detach_dev(h1);
+    			if (detaching) detach_dev(t2);
+    			if (detaching) detach_dev(div1);
     			if (detaching) detach_dev(t3);
-    			if (detaching) detach_dev(div);
+    			if (detaching) detach_dev(h1);
+    			if (detaching) detach_dev(t5);
+    			if (detaching) detach_dev(div2);
     			destroy_each(each_blocks, detaching);
     			mounted = false;
     			dispose();
@@ -43439,22 +43747,22 @@ var app = (function () {
     			div1 = element("div");
     			t4 = space();
     			button = element("button");
-    			button.textContent = "Go";
+    			button.textContent = "GO";
     			set_style(div0, "height", "40px");
-    			add_location(div0, file, 81, 12, 2374);
-    			attr_dev(h1, "class", "svelte-1wb55tw");
-    			add_location(h1, file, 82, 12, 2415);
+    			add_location(div0, file, 81, 12, 2378);
+    			attr_dev(h1, "class", "svelte-1u5keby");
+    			add_location(h1, file, 82, 12, 2419);
     			attr_dev(input, "type", "text");
     			attr_dev(input, "maxlength", "10");
     			attr_dev(input, "minlength", "2");
-    			attr_dev(input, "class", "svelte-1wb55tw");
-    			add_location(input, file, 84, 16, 2531);
+    			attr_dev(input, "class", "svelte-1u5keby");
+    			add_location(input, file, 84, 16, 2535);
     			set_style(div1, "width", "10px");
-    			add_location(div1, file, 85, 16, 2617);
-    			attr_dev(button, "class", "game-start svelte-1wb55tw");
-    			add_location(button, file, 86, 16, 2661);
-    			attr_dev(form, "class", "nick-insert svelte-1wb55tw");
-    			add_location(form, file, 83, 12, 2458);
+    			add_location(div1, file, 85, 16, 2621);
+    			attr_dev(button, "class", "game-start svelte-1u5keby");
+    			add_location(button, file, 86, 16, 2665);
+    			attr_dev(form, "class", "nick-insert svelte-1u5keby");
+    			add_location(form, file, 83, 12, 2462);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div0, anchor);
@@ -43463,7 +43771,7 @@ var app = (function () {
     			insert_dev(target, t2, anchor);
     			insert_dev(target, form, anchor);
     			append_dev(form, input);
-    			set_input_value(input, /*pName*/ ctx[4]);
+    			set_input_value(input, /*pName*/ ctx[5]);
     			append_dev(form, t3);
     			append_dev(form, div1);
     			append_dev(form, t4);
@@ -43472,15 +43780,15 @@ var app = (function () {
     			if (!mounted) {
     				dispose = [
     					listen_dev(input, "input", /*input_input_handler*/ ctx[11]),
-    					listen_dev(form, "submit", /*handleSubmitName*/ ctx[7], false, false, false)
+    					listen_dev(form, "submit", /*handleSubmitName*/ ctx[8], false, false, false)
     				];
 
     				mounted = true;
     			}
     		},
     		p: function update(ctx, dirty) {
-    			if (dirty & /*pName*/ 16 && input.value !== /*pName*/ ctx[4]) {
-    				set_input_value(input, /*pName*/ ctx[4]);
+    			if (dirty & /*pName*/ 32 && input.value !== /*pName*/ ctx[5]) {
+    				set_input_value(input, /*pName*/ ctx[5]);
     			}
     		},
     		i: noop,
@@ -43525,10 +43833,10 @@ var app = (function () {
     			h3 = element("h3");
     			h3.textContent = "Try another time";
     			set_style(div, "height", "50px");
-    			add_location(div, file, 77, 12, 2220);
-    			attr_dev(h1, "class", "svelte-1wb55tw");
-    			add_location(h1, file, 78, 12, 2261);
-    			add_location(h3, file, 79, 12, 2304);
+    			add_location(div, file, 77, 12, 2224);
+    			attr_dev(h1, "class", "svelte-1u5keby");
+    			add_location(h1, file, 78, 12, 2265);
+    			add_location(h3, file, 79, 12, 2308);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -43560,8 +43868,8 @@ var app = (function () {
     	return block;
     }
 
-    // (96:24) {#if $pacmanId == pacman.id}
-    function create_if_block_4(ctx) {
+    // (98:24) {#if $pacmanId == pacman.id}
+    function create_if_block_5(ctx) {
     	let t;
 
     	const block = {
@@ -43578,58 +43886,116 @@ var app = (function () {
 
     	dispatch_dev("SvelteRegisterBlock", {
     		block,
-    		id: create_if_block_4.name,
+    		id: create_if_block_5.name,
     		type: "if",
-    		source: "(96:24) {#if $pacmanId == pacman.id}",
+    		source: "(98:24) {#if $pacmanId == pacman.id}",
     		ctx
     	});
 
     	return block;
     }
 
-    // (93:16) {#each pacmanList as pacman}
-    function create_each_block(ctx) {
-    	let div;
-    	let t0_value = /*pacman*/ ctx[20].name + "";
+    // (99:24) {#if $pacmanId == pacman.id}
+    function create_if_block_4(ctx) {
+    	let t0_value = /*provider*/ ctx[0].room.peerId + "";
     	let t0;
     	let t1;
+
+    	const block = {
+    		c: function create() {
+    			t0 = text(t0_value);
+    			t1 = text("(PEERID)");
+    		},
+    		m: function mount(target, anchor) {
+    			insert_dev(target, t0, anchor);
+    			insert_dev(target, t1, anchor);
+    		},
+    		p: function update(ctx, dirty) {
+    			if (dirty & /*provider*/ 1 && t0_value !== (t0_value = /*provider*/ ctx[0].room.peerId + "")) set_data_dev(t0, t0_value);
+    		},
+    		d: function destroy(detaching) {
+    			if (detaching) detach_dev(t0);
+    			if (detaching) detach_dev(t1);
+    		}
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_if_block_4.name,
+    		type: "if",
+    		source: "(99:24) {#if $pacmanId == pacman.id}",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    // (95:16) {#each pacmanList as pacman}
+    function create_each_block(ctx) {
+    	let div;
+    	let t0;
+    	let t1_value = /*pacman*/ ctx[20].name + "";
+    	let t1;
     	let t2;
-    	let if_block = /*$pacmanId*/ ctx[6] == /*pacman*/ ctx[20].id && create_if_block_4(ctx);
+    	let t3;
+    	let t4;
+    	let if_block0 = /*$pacmanId*/ ctx[7] == /*pacman*/ ctx[20].id && create_if_block_5(ctx);
+    	let if_block1 = /*$pacmanId*/ ctx[7] == /*pacman*/ ctx[20].id && create_if_block_4(ctx);
 
     	const block = {
     		c: function create() {
     			div = element("div");
-    			t0 = text(t0_value);
-    			t1 = space();
-    			if (if_block) if_block.c();
+    			t0 = text("• ");
+    			t1 = text(t1_value);
     			t2 = space();
-    			attr_dev(div, "class", "pacman-name svelte-1wb55tw");
-    			add_location(div, file, 93, 20, 2978);
+    			if (if_block0) if_block0.c();
+    			t3 = space();
+    			if (if_block1) if_block1.c();
+    			t4 = space();
+    			attr_dev(div, "class", "pacman-name svelte-1u5keby");
+    			add_location(div, file, 95, 20, 3064);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
     			append_dev(div, t0);
     			append_dev(div, t1);
-    			if (if_block) if_block.m(div, null);
     			append_dev(div, t2);
+    			if (if_block0) if_block0.m(div, null);
+    			append_dev(div, t3);
+    			if (if_block1) if_block1.m(div, null);
+    			append_dev(div, t4);
     		},
     		p: function update(ctx, dirty) {
-    			if (dirty & /*pacmanList*/ 32 && t0_value !== (t0_value = /*pacman*/ ctx[20].name + "")) set_data_dev(t0, t0_value);
+    			if (dirty & /*pacmanList*/ 64 && t1_value !== (t1_value = /*pacman*/ ctx[20].name + "")) set_data_dev(t1, t1_value);
 
-    			if (/*$pacmanId*/ ctx[6] == /*pacman*/ ctx[20].id) {
-    				if (if_block) ; else {
-    					if_block = create_if_block_4(ctx);
-    					if_block.c();
-    					if_block.m(div, t2);
+    			if (/*$pacmanId*/ ctx[7] == /*pacman*/ ctx[20].id) {
+    				if (if_block0) ; else {
+    					if_block0 = create_if_block_5(ctx);
+    					if_block0.c();
+    					if_block0.m(div, t3);
     				}
-    			} else if (if_block) {
-    				if_block.d(1);
-    				if_block = null;
+    			} else if (if_block0) {
+    				if_block0.d(1);
+    				if_block0 = null;
+    			}
+
+    			if (/*$pacmanId*/ ctx[7] == /*pacman*/ ctx[20].id) {
+    				if (if_block1) {
+    					if_block1.p(ctx, dirty);
+    				} else {
+    					if_block1 = create_if_block_4(ctx);
+    					if_block1.c();
+    					if_block1.m(div, t4);
+    				}
+    			} else if (if_block1) {
+    				if_block1.d(1);
+    				if_block1 = null;
     			}
     		},
     		d: function destroy(detaching) {
     			if (detaching) detach_dev(div);
-    			if (if_block) if_block.d();
+    			if (if_block0) if_block0.d();
+    			if (if_block1) if_block1.d();
     		}
     	};
 
@@ -43637,7 +44003,7 @@ var app = (function () {
     		block,
     		id: create_each_block.name,
     		type: "each",
-    		source: "(93:16) {#each pacmanList as pacman}",
+    		source: "(95:16) {#each pacmanList as pacman}",
     		ctx
     	});
 
@@ -43647,7 +44013,7 @@ var app = (function () {
     function create_fragment$2(ctx) {
     	let if_block_anchor;
     	let current;
-    	let if_block = !/*hideMenu*/ ctx[0] && create_if_block$1(ctx);
+    	let if_block = !/*hideMenu*/ ctx[1] && create_if_block$1(ctx);
 
     	const block = {
     		c: function create() {
@@ -43663,11 +44029,11 @@ var app = (function () {
     			current = true;
     		},
     		p: function update(ctx, [dirty]) {
-    			if (!/*hideMenu*/ ctx[0]) {
+    			if (!/*hideMenu*/ ctx[1]) {
     				if (if_block) {
     					if_block.p(ctx, dirty);
 
-    					if (dirty & /*hideMenu*/ 1) {
+    					if (dirty & /*hideMenu*/ 2) {
     						transition_in(if_block, 1);
     					}
     				} else {
@@ -43718,7 +44084,7 @@ var app = (function () {
     	validate_store(globalState, 'globalState');
     	component_subscribe($$self, globalState, $$value => $$invalidate(15, $globalState = $$value));
     	validate_store(pacmanId, 'pacmanId');
-    	component_subscribe($$self, pacmanId, $$value => $$invalidate(6, $pacmanId = $$value));
+    	component_subscribe($$self, pacmanId, $$value => $$invalidate(7, $pacmanId = $$value));
     	let { $$slots: slots = {}, $$scope } = $$props;
     	validate_slots('Menu', slots, []);
     	let { ydoc } = $$props;
@@ -43753,7 +44119,7 @@ var app = (function () {
     	});
 
     	function closeConnection() {
-    		$$invalidate(3, errorGameStarted = true);
+    		$$invalidate(4, errorGameStarted = true);
     		provider.disconnect();
     	}
 
@@ -43764,8 +44130,8 @@ var app = (function () {
     			updatePacmanList();
     			pacmanName.set(pName);
     			pacmanId.set(Utils.genRandomId());
-    			$$invalidate(1, insertName = false);
-    			$$invalidate(2, pressStart = true);
+    			$$invalidate(2, insertName = false);
+    			$$invalidate(3, pressStart = true);
     		} else {
     			closeConnection();
     		}
@@ -43777,8 +44143,8 @@ var app = (function () {
     		interval = setInterval(
     			() => {
     				if ($globalState != null) {
-    					$$invalidate(5, pacmanList = Array.from($globalState.getPacmans()));
-    					$$invalidate(5, pacmanList); // for svelte reactivity
+    					$$invalidate(6, pacmanList = Array.from($globalState.getPacmansList()));
+    					$$invalidate(6, pacmanList); // for svelte reactivity
     				}
     			},
     			200
@@ -43789,7 +44155,7 @@ var app = (function () {
     		clearInterval(interval);
     		gameState.set("game_started", true);
     		$globalState.setCurrentPacmanPlaying(true);
-    		$$invalidate(2, pressStart = false);
+    		$$invalidate(3, pressStart = false);
     		isAllready();
     	}
 
@@ -43797,7 +44163,7 @@ var app = (function () {
     		interval = setInterval(
     			() => {
     				if ($globalState != null) {
-    					$$invalidate(0, hideMenu = $globalState.checkIfAllPlaying());
+    					$$invalidate(1, hideMenu = $globalState.checkIfAllPlaying());
 
     					if (hideMenu) {
     						clearInterval(interval);
@@ -43816,7 +44182,7 @@ var app = (function () {
 
     	function input_input_handler() {
     		pName = this.value;
-    		$$invalidate(4, pName);
+    		$$invalidate(5, pName);
     	}
 
     	const click_handler = () => {
@@ -43824,8 +44190,8 @@ var app = (function () {
     	};
 
     	$$self.$$set = $$props => {
-    		if ('ydoc' in $$props) $$invalidate(9, ydoc = $$props.ydoc);
-    		if ('provider' in $$props) $$invalidate(10, provider = $$props.provider);
+    		if ('ydoc' in $$props) $$invalidate(10, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(0, provider = $$props.provider);
     	};
 
     	$$self.$capture_state = () => ({
@@ -43857,14 +44223,14 @@ var app = (function () {
     	});
 
     	$$self.$inject_state = $$props => {
-    		if ('ydoc' in $$props) $$invalidate(9, ydoc = $$props.ydoc);
-    		if ('provider' in $$props) $$invalidate(10, provider = $$props.provider);
-    		if ('hideMenu' in $$props) $$invalidate(0, hideMenu = $$props.hideMenu);
-    		if ('insertName' in $$props) $$invalidate(1, insertName = $$props.insertName);
-    		if ('pressStart' in $$props) $$invalidate(2, pressStart = $$props.pressStart);
-    		if ('errorGameStarted' in $$props) $$invalidate(3, errorGameStarted = $$props.errorGameStarted);
-    		if ('pName' in $$props) $$invalidate(4, pName = $$props.pName);
-    		if ('pacmanList' in $$props) $$invalidate(5, pacmanList = $$props.pacmanList);
+    		if ('ydoc' in $$props) $$invalidate(10, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(0, provider = $$props.provider);
+    		if ('hideMenu' in $$props) $$invalidate(1, hideMenu = $$props.hideMenu);
+    		if ('insertName' in $$props) $$invalidate(2, insertName = $$props.insertName);
+    		if ('pressStart' in $$props) $$invalidate(3, pressStart = $$props.pressStart);
+    		if ('errorGameStarted' in $$props) $$invalidate(4, errorGameStarted = $$props.errorGameStarted);
+    		if ('pName' in $$props) $$invalidate(5, pName = $$props.pName);
+    		if ('pacmanList' in $$props) $$invalidate(6, pacmanList = $$props.pacmanList);
     		if ('gameState' in $$props) gameState = $$props.gameState;
     		if ('gameStarted' in $$props) gameStarted = $$props.gameStarted;
     		if ('interval' in $$props) interval = $$props.interval;
@@ -43875,6 +44241,7 @@ var app = (function () {
     	}
 
     	return [
+    		provider,
     		hideMenu,
     		insertName,
     		pressStart,
@@ -43885,7 +44252,6 @@ var app = (function () {
     		handleSubmitName,
     		startGame,
     		ydoc,
-    		provider,
     		input_input_handler,
     		click_handler
     	];
@@ -43894,7 +44260,7 @@ var app = (function () {
     class Menu extends SvelteComponentDev {
     	constructor(options) {
     		super(options);
-    		init(this, options, instance$2, create_fragment$2, safe_not_equal, { ydoc: 9, provider: 10 });
+    		init(this, options, instance$2, create_fragment$2, safe_not_equal, { ydoc: 10, provider: 0 });
 
     		dispatch_dev("SvelteRegisterComponent", {
     			component: this,
@@ -43906,11 +44272,11 @@ var app = (function () {
     		const { ctx } = this.$$;
     		const props = options.props || {};
 
-    		if (/*ydoc*/ ctx[9] === undefined && !('ydoc' in props)) {
+    		if (/*ydoc*/ ctx[10] === undefined && !('ydoc' in props)) {
     			console.warn("<Menu> was created without expected prop 'ydoc'");
     		}
 
-    		if (/*provider*/ ctx[10] === undefined && !('provider' in props)) {
+    		if (/*provider*/ ctx[0] === undefined && !('provider' in props)) {
     			console.warn("<Menu> was created without expected prop 'provider'");
     		}
     	}
@@ -43960,6 +44326,5564 @@ var app = (function () {
         get() {
             return this.camera;
         }
+    }
+
+    class FontLoader extends Loader {
+
+    	constructor( manager ) {
+
+    		super( manager );
+
+    	}
+
+    	load( url, onLoad, onProgress, onError ) {
+
+    		const scope = this;
+
+    		const loader = new FileLoader( this.manager );
+    		loader.setPath( this.path );
+    		loader.setRequestHeader( this.requestHeader );
+    		loader.setWithCredentials( scope.withCredentials );
+    		loader.load( url, function ( text ) {
+
+    			let json;
+
+    			try {
+
+    				json = JSON.parse( text );
+
+    			} catch ( e ) {
+
+    				console.warn( 'THREE.FontLoader: typeface.js support is being deprecated. Use typeface.json instead.' );
+    				json = JSON.parse( text.substring( 65, text.length - 2 ) );
+
+    			}
+
+    			const font = scope.parse( json );
+
+    			if ( onLoad ) onLoad( font );
+
+    		}, onProgress, onError );
+
+    	}
+
+    	parse( json ) {
+
+    		return new Font( json );
+
+    	}
+
+    }
+
+    //
+
+    class Font {
+
+    	constructor( data ) {
+
+    		this.type = 'Font';
+
+    		this.data = data;
+
+    	}
+
+    	generateShapes( text, size = 100 ) {
+
+    		const shapes = [];
+    		const paths = createPaths( text, size, this.data );
+
+    		for ( let p = 0, pl = paths.length; p < pl; p ++ ) {
+
+    			Array.prototype.push.apply( shapes, paths[ p ].toShapes() );
+
+    		}
+
+    		return shapes;
+
+    	}
+
+    }
+
+    function createPaths( text, size, data ) {
+
+    	const chars = Array.from( text );
+    	const scale = size / data.resolution;
+    	const line_height = ( data.boundingBox.yMax - data.boundingBox.yMin + data.underlineThickness ) * scale;
+
+    	const paths = [];
+
+    	let offsetX = 0, offsetY = 0;
+
+    	for ( let i = 0; i < chars.length; i ++ ) {
+
+    		const char = chars[ i ];
+
+    		if ( char === '\n' ) {
+
+    			offsetX = 0;
+    			offsetY -= line_height;
+
+    		} else {
+
+    			const ret = createPath( char, scale, offsetX, offsetY, data );
+    			offsetX += ret.offsetX;
+    			paths.push( ret.path );
+
+    		}
+
+    	}
+
+    	return paths;
+
+    }
+
+    function createPath( char, scale, offsetX, offsetY, data ) {
+
+    	const glyph = data.glyphs[ char ] || data.glyphs[ '?' ];
+
+    	if ( ! glyph ) {
+
+    		console.error( 'THREE.Font: character "' + char + '" does not exists in font family ' + data.familyName + '.' );
+
+    		return;
+
+    	}
+
+    	const path = new ShapePath();
+
+    	let x, y, cpx, cpy, cpx1, cpy1, cpx2, cpy2;
+
+    	if ( glyph.o ) {
+
+    		const outline = glyph._cachedOutline || ( glyph._cachedOutline = glyph.o.split( ' ' ) );
+
+    		for ( let i = 0, l = outline.length; i < l; ) {
+
+    			const action = outline[ i ++ ];
+
+    			switch ( action ) {
+
+    				case 'm': // moveTo
+
+    					x = outline[ i ++ ] * scale + offsetX;
+    					y = outline[ i ++ ] * scale + offsetY;
+
+    					path.moveTo( x, y );
+
+    					break;
+
+    				case 'l': // lineTo
+
+    					x = outline[ i ++ ] * scale + offsetX;
+    					y = outline[ i ++ ] * scale + offsetY;
+
+    					path.lineTo( x, y );
+
+    					break;
+
+    				case 'q': // quadraticCurveTo
+
+    					cpx = outline[ i ++ ] * scale + offsetX;
+    					cpy = outline[ i ++ ] * scale + offsetY;
+    					cpx1 = outline[ i ++ ] * scale + offsetX;
+    					cpy1 = outline[ i ++ ] * scale + offsetY;
+
+    					path.quadraticCurveTo( cpx1, cpy1, cpx, cpy );
+
+    					break;
+
+    				case 'b': // bezierCurveTo
+
+    					cpx = outline[ i ++ ] * scale + offsetX;
+    					cpy = outline[ i ++ ] * scale + offsetY;
+    					cpx1 = outline[ i ++ ] * scale + offsetX;
+    					cpy1 = outline[ i ++ ] * scale + offsetY;
+    					cpx2 = outline[ i ++ ] * scale + offsetX;
+    					cpy2 = outline[ i ++ ] * scale + offsetY;
+
+    					path.bezierCurveTo( cpx1, cpy1, cpx2, cpy2, cpx, cpy );
+
+    					break;
+
+    			}
+
+    		}
+
+    	}
+
+    	return { offsetX: glyph.ha * scale, path: path };
+
+    }
+
+    Font.prototype.isFont = true;
+
+    /**
+     * Text = 3D Text
+     *
+     * parameters = {
+     *  font: <THREE.Font>, // font
+     *
+     *  size: <float>, // size of the text
+     *  height: <float>, // thickness to extrude text
+     *  curveSegments: <int>, // number of points on the curves
+     *
+     *  bevelEnabled: <bool>, // turn on bevel
+     *  bevelThickness: <float>, // how deep into text bevel goes
+     *  bevelSize: <float>, // how far from text outline (including bevelOffset) is bevel
+     *  bevelOffset: <float> // how far from text outline does bevel start
+     * }
+     */
+
+    class TextGeometry extends ExtrudeGeometry {
+
+    	constructor( text, parameters = {} ) {
+
+    		const font = parameters.font;
+
+    		if ( ! ( font && font.isFont ) ) {
+
+    			console.error( 'THREE.TextGeometry: font parameter is not an instance of THREE.Font.' );
+    			return new BufferGeometry();
+
+    		}
+
+    		const shapes = font.generateShapes( text, parameters.size );
+
+    		// translate parameters to ExtrudeGeometry API
+
+    		parameters.depth = parameters.height !== undefined ? parameters.height : 50;
+
+    		// defaults
+
+    		if ( parameters.bevelThickness === undefined ) parameters.bevelThickness = 10;
+    		if ( parameters.bevelSize === undefined ) parameters.bevelSize = 8;
+    		if ( parameters.bevelEnabled === undefined ) parameters.bevelEnabled = false;
+
+    		super( shapes, parameters );
+
+    		this.type = 'TextGeometry';
+
+    	}
+
+    }
+
+    var glyphs = {
+    	"0": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 347 174 m 521 347 l 868 347 l 868 1042 l 694 1042 l 694 1215 l 347 1215 l 347 521 l 521 521 l 521 347 z "
+    	},
+    	"1": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"2": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 694 868 l 694 1042 l 868 1042 l 868 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 521 521 l 521 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"3": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 694 l 347 694 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"4": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 174 l 694 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 1042 1389 l 1042 694 l 1215 694 l 1215 521 l 1042 521 l 1042 174 l 694 174 m 347 694 l 694 694 l 694 1042 l 521 1042 l 521 868 l 347 868 l 347 694 z "
+    	},
+    	"5": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 868 l 0 868 l 0 1389 l 1042 1389 l 1042 1215 l 347 1215 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"6": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 521 1215 l 521 1042 l 347 1042 l 347 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"7": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 694 l 521 694 l 521 868 l 694 868 l 694 1042 l 868 1042 l 868 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 694 694 l 694 174 l 347 174 z "
+    	},
+    	"8": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 694 l 174 694 l 174 868 l 0 868 l 0 1215 l 174 1215 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 868 868 l 868 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 868 l 868 868 l 868 1215 l 347 1215 l 347 1042 l 521 1042 l 521 868 m 174 347 l 868 347 l 868 521 l 521 521 l 521 694 l 174 694 l 174 347 z "
+    	},
+    	"9": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 694 347 l 694 521 l 868 521 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 174 174 m 347 868 l 868 868 l 868 1215 l 347 1215 l 347 868 z "
+    	},
+    	"\u0000": {
+    		ha: 0,
+    		x_min: 0,
+    		x_max: 0,
+    		o: ""
+    	},
+    	"\r": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 0,
+    		o: ""
+    	},
+    	" ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 0,
+    		o: ""
+    	},
+    	A: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	"Á": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 m 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 l 868 521 l 868 694 z "
+    	},
+    	"Ă": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1215 l 868 1215 l 868 868 l 1042 868 l 1042 694 l 1215 694 m 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 l 868 521 l 868 694 z "
+    	},
+    	"Â": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 521 l 868 521 l 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 z "
+    	},
+    	"Ä": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 m 347 521 l 868 521 l 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 z "
+    	},
+    	"À": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 m 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 l 868 521 l 868 694 z "
+    	},
+    	"Ā": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 m 347 521 l 868 521 l 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 z "
+    	},
+    	"Ą": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 694 l 347 694 l 347 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 m 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 868 l 868 868 l 868 1042 m 694 347 l 868 347 l 868 174 l 694 174 l 694 347 m 868 0 l 868 174 l 1215 174 l 1215 0 l 868 0 z "
+    	},
+    	"Å": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 868 1215 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 521 l 868 521 l 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 z "
+    	},
+    	"Ã": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 868 l 1042 868 l 1042 694 l 1215 694 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 347 1215 l 347 1042 l 174 1042 l 174 1215 l 347 1215 m 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 l 868 521 l 868 694 z "
+    	},
+    	"Æ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 868 l 1215 868 l 1215 694 l 868 694 l 868 347 l 1215 347 l 1215 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 m 347 694 l 521 694 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	B: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 868 l 868 868 l 868 1215 l 347 1215 l 347 868 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	C: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 347 1042 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"Ć": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 694 l 868 694 l 868 868 l 521 868 l 521 694 l 347 694 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"Č": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 1042 1215 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 868 l 521 868 l 521 694 l 347 694 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"Ç": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 l 521 694 l 521 521 l 868 521 l 868 694 l 1215 694 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 694 174 l 694 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	"Ĉ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 868 l 521 868 l 521 694 l 347 694 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"Ċ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 868 l 521 868 l 521 694 l 347 694 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	D: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 0 174 m 347 347 l 694 347 l 694 521 l 868 521 l 868 1042 l 694 1042 l 694 1215 l 347 1215 l 347 347 z "
+    	},
+    	"Ð": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 174 174 m 521 347 l 694 347 l 694 521 l 868 521 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 868 l 694 868 l 694 694 l 521 694 l 521 347 z "
+    	},
+    	"Ď": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 0 174 m 347 347 l 694 347 l 694 521 l 868 521 l 868 694 l 694 694 l 694 868 l 347 868 l 347 347 z "
+    	},
+    	"Đ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 174 174 m 521 347 l 694 347 l 694 521 l 868 521 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 868 l 694 868 l 694 694 l 521 694 l 521 347 z "
+    	},
+    	E: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 347 694 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"É": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"Ĕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 l 0 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ě": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ê": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"Ë": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ė": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 0 174 l 0 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"È": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"Ē": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ę": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 347 1215 l 347 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1215 694 l 1215 521 l 694 521 l 694 347 l 521 347 l 521 521 l 0 521 l 0 1389 l 1215 1389 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	F: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 347 694 l 347 174 l 0 174 z "
+    	},
+    	G: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1215 1389 l 1215 1215 l 521 1215 l 521 1042 l 347 1042 l 347 521 l 521 521 l 521 347 l 868 347 l 868 694 l 694 694 l 694 868 l 1215 868 l 1215 174 l 347 174 z "
+    	},
+    	"Ğ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 868 l 347 868 l 347 347 l 868 347 l 868 521 l 694 521 l 694 694 l 1215 694 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ĝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 347 868 l 347 347 l 868 347 l 868 521 l 694 521 l 694 694 l 1215 694 l 1215 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"Ģ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 174 l 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1215 1389 l 1215 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 l 521 694 l 521 521 l 868 521 l 868 694 l 694 694 l 694 868 l 1215 868 l 1215 347 l 868 347 l 868 174 l 694 174 l 694 0 l 347 0 z "
+    	},
+    	"Ġ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 347 868 l 347 347 l 868 347 l 868 521 l 694 521 l 694 694 l 1215 694 l 1215 174 l 174 174 z "
+    	},
+    	H: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 694 l 347 694 l 347 174 l 0 174 z "
+    	},
+    	"Ħ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 694 l 347 694 l 347 174 l 0 174 m 347 868 l 868 868 l 868 1042 l 347 1042 l 347 868 z "
+    	},
+    	"Ĥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1215 1215 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	I: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ĳ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 521 l 0 694 l 174 694 l 174 1215 l 0 1215 l 0 1389 l 694 1389 l 694 1215 l 521 1215 l 521 694 l 694 694 l 694 521 l 0 521 m 174 174 l 174 347 l 868 347 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Í": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"Ĭ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 868 1215 l 868 1042 l 1215 1042 z "
+    	},
+    	"Î": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ï": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 868 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"İ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ì": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 1389 l 694 1215 l 521 1215 l 521 1389 l 694 1389 m 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ī": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 174 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Į": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 868 1215 l 868 694 l 1215 694 l 1215 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 521 694 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"Ĩ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 694 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1215 l 347 1215 l 347 1042 l 694 1042 l 694 1215 z "
+    	},
+    	J: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ĵ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 1215 l 694 1215 l 694 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	K: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 694 868 l 694 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"Ķ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 347 174 l 347 347 l 0 347 l 0 1389 l 347 1389 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 694 1042 l 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 694 347 l 694 174 l 521 174 l 521 0 l 174 0 m 347 347 l 694 347 l 694 521 l 521 521 l 521 694 l 347 694 l 347 347 z "
+    	},
+    	L: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1389 l 521 1389 l 521 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ĺ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 347 l 1215 174 l 174 174 l 174 1215 l 694 1215 l 694 1042 l 521 1042 l 521 347 l 1215 347 z "
+    	},
+    	"Ľ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1389 l 521 1389 l 521 347 l 1215 347 l 1215 174 l 174 174 m 868 868 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 z "
+    	},
+    	"Ļ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 174 l 521 174 l 521 347 l 174 347 l 174 1389 l 521 1389 l 521 521 l 1215 521 l 1215 347 l 868 347 l 868 174 l 694 174 l 694 0 l 347 0 z "
+    	},
+    	"Ŀ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1389 l 521 1389 l 521 347 l 1215 347 l 1215 174 l 174 174 m 694 694 l 694 1042 l 1042 1042 l 1042 694 l 694 694 z "
+    	},
+    	"Ł": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1389 l 521 1389 l 521 1042 l 694 1042 l 694 868 l 521 868 l 521 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	M: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 868 l 694 868 l 694 521 l 521 521 l 521 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	N: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 868 l 868 868 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"Ń": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 1215 1042 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 521 1042 l 521 868 l 694 868 l 694 694 l 868 694 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ň": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 521 1042 l 521 868 l 694 868 l 694 694 l 868 694 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ņ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 347 l 868 347 l 868 521 l 694 521 l 694 694 l 521 694 l 521 868 l 347 868 l 347 347 l 0 347 l 0 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 m 521 347 l 868 347 l 868 174 l 694 174 l 694 0 l 347 0 l 347 174 l 521 174 l 521 347 z "
+    	},
+    	"Ŋ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 868 l 347 868 l 347 347 l 0 347 l 0 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 174 l 1042 174 l 1042 0 l 347 0 z "
+    	},
+    	"Ñ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 521 1042 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1042 l 521 1042 l 521 868 l 694 868 l 694 694 l 868 694 l 868 1042 l 1215 1042 z "
+    	},
+    	O: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 1215 l 347 1215 l 347 347 z "
+    	},
+    	"Ó": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"Ŏ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"Ô": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"Ö": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"Ò": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"Ő": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"Ō": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"Ø": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 694 868 l 694 1042 l 868 1042 l 868 1215 l 347 1215 l 347 694 l 521 694 l 521 521 l 347 521 l 347 347 m 521 694 l 521 868 l 694 868 l 694 694 l 521 694 z "
+    	},
+    	"Õ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1042 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"Œ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 868 l 1215 868 l 1215 694 l 868 694 l 868 347 l 1215 347 l 1215 174 l 174 174 m 347 347 l 521 347 l 521 1215 l 347 1215 l 347 347 z "
+    	},
+    	P: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 694 l 1042 694 l 1042 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1215 l 347 1215 l 347 694 z "
+    	},
+    	"Þ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 347 347 l 347 174 l 0 174 m 347 521 l 868 521 l 868 1042 l 347 1042 l 347 521 z "
+    	},
+    	Q: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 868 1215 l 347 1215 l 347 347 l 694 347 l 694 521 l 521 521 l 521 694 l 868 694 l 868 1215 m 1042 174 l 1042 347 l 1215 347 l 1215 174 l 1042 174 z "
+    	},
+    	R: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 m 347 694 l 694 694 l 694 868 l 868 868 l 868 1215 l 347 1215 l 347 694 z "
+    	},
+    	"Ŕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 694 868 l 347 868 l 347 694 l 694 694 l 694 868 z "
+    	},
+    	"Ř": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 694 868 l 347 868 l 347 694 l 694 694 l 694 868 z "
+    	},
+    	"Ŗ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 174 l 521 174 l 521 347 l 694 347 l 694 521 l 521 521 l 521 694 l 347 694 l 347 347 l 0 347 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 868 347 l 868 174 l 694 174 l 694 0 l 347 0 m 347 868 l 694 868 l 694 1042 l 868 1042 l 868 1215 l 347 1215 l 347 868 z "
+    	},
+    	S: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ś": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 z "
+    	},
+    	"Š": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 z "
+    	},
+    	"Ş": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 868 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 694 174 l 694 347 l 174 347 l 174 521 l 0 521 l 0 694 l 347 694 l 347 521 l 868 521 l 868 868 l 174 868 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 347 1215 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	"Ŝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	T: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 174 l 521 174 z "
+    	},
+    	"Ŧ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 521 l 347 521 l 347 694 l 521 694 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 868 l 1042 868 l 1042 694 l 868 694 l 868 174 l 521 174 z "
+    	},
+    	"Ť": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 868 l 868 868 l 868 174 l 521 174 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 868 1215 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ț": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 868 1215 l 868 174 l 694 174 l 694 347 l 521 347 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	U: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1389 l 347 1389 l 347 347 l 868 347 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ú": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ŭ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 868 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"Û": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 174 1042 m 174 174 l 174 347 l 0 347 l 0 868 l 347 868 l 347 347 l 868 347 l 868 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ü": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ù": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 521 1042 l 521 1215 l 694 1215 l 694 1042 l 521 1042 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ű": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 347 l 868 347 l 868 1042 l 1215 1042 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 z "
+    	},
+    	"Ū": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ų": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 694 l 1042 694 l 1042 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 0 694 l 0 1389 l 347 1389 l 347 694 l 868 694 l 868 1389 l 1215 1389 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"Ů": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 868 347 l 868 868 l 1042 868 l 1042 1042 l 868 1042 l 868 868 l 347 868 l 347 1042 l 174 1042 l 174 868 l 347 868 l 347 347 z "
+    	},
+    	"Ũ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 521 1042 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	V: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1389 l 1215 1389 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 347 l 694 347 l 694 174 l 521 174 z "
+    	},
+    	W: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1389 l 347 1389 l 347 694 l 521 694 l 521 1389 l 694 1389 l 694 694 l 868 694 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 868 174 l 868 347 l 694 347 l 694 521 l 521 521 l 521 347 l 347 347 l 347 174 l 174 174 z "
+    	},
+    	"Ŵ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 174 l 0 174 m 347 694 l 521 694 l 521 868 l 694 868 l 694 694 l 868 694 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	X: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 174 868 l 174 1042 l 0 1042 l 0 1389 l 347 1389 l 347 1042 l 521 1042 l 521 868 l 694 868 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	Y: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 694 l 347 694 l 347 868 l 174 868 l 174 1389 l 521 1389 l 521 868 l 868 868 l 868 1389 l 1215 1389 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 174 l 521 174 z "
+    	},
+    	"Ý": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 174 l 521 174 l 521 521 l 347 521 l 347 694 l 174 694 l 174 1042 l 521 1042 l 521 694 l 868 694 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ŷ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 521 l 347 521 l 347 694 l 174 694 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 174 l 521 174 m 521 694 l 868 694 l 868 1215 l 521 1215 l 521 694 z "
+    	},
+    	"Ÿ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 868 1215 m 521 174 l 521 521 l 347 521 l 347 694 l 174 694 l 174 1042 l 521 1042 l 521 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 174 l 521 174 z "
+    	},
+    	Z: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 0 1215 l 0 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 694 694 l 694 521 l 521 521 l 521 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ź": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"Ž": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ż": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	a: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"á": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 521 l 347 521 l 347 347 l 868 347 l 868 521 z "
+    	},
+    	"ă": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 521 l 347 521 l 347 347 l 868 347 l 868 521 z "
+    	},
+    	"â": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ä": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"à": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 868 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 521 l 347 521 l 347 347 l 868 347 l 868 521 z "
+    	},
+    	"ā": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ą": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 868 1042 l 868 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 868 868 l 347 868 l 347 694 l 868 694 l 868 868 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"å": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ã": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1042 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"æ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 521 694 l 521 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 694 521 l 694 347 l 1042 347 l 1042 174 l 174 174 m 694 694 l 868 694 l 868 868 l 694 868 l 694 694 m 347 347 l 521 347 l 521 521 l 347 521 l 347 347 z "
+    	},
+    	b: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1389 l 347 1389 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	c: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 347 868 l 347 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ć": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 868 l 347 868 l 347 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"č": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1215 1042 l 1215 868 l 347 868 l 347 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ç": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 868 l 347 868 l 347 521 l 1215 521 l 1215 347 l 868 347 l 868 174 l 694 174 l 694 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 1215 1042 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	"ĉ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 347 868 l 347 347 l 1215 347 l 1215 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"ċ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 347 868 l 347 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	d: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"ð": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 694 l 174 694 l 174 868 l 521 868 l 521 1042 l 174 1042 l 174 1389 l 521 1389 l 521 1215 l 868 1215 l 868 868 l 1042 868 l 1042 694 l 1215 694 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 174 1042 l 174 868 l 0 868 l 0 1042 l 174 1042 m 868 694 l 347 694 l 347 347 l 868 347 l 868 694 z "
+    	},
+    	"ď": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 174 l 174 174 m 1042 868 l 1042 1389 l 1389 1389 l 1389 1042 l 1215 1042 l 1215 868 l 1042 868 m 347 347 l 521 347 l 521 868 l 347 868 l 347 347 z "
+    	},
+    	"đ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 1042 1042 l 1042 174 l 174 174 m 347 347 l 694 347 l 694 868 l 347 868 l 347 347 z "
+    	},
+    	e: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"é": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 694 l 868 694 l 868 868 z "
+    	},
+    	"ĕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 694 l 868 694 l 868 868 z "
+    	},
+    	"ě": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ê": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ë": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ė": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"è": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 694 l 868 694 l 868 868 z "
+    	},
+    	"ē": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ę": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 0 694 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 868 1215 l 347 1215 l 347 1042 l 868 1042 l 868 1215 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	f: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 174 l 521 174 z "
+    	},
+    	g: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	"ğ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1215 1042 m 868 868 l 347 868 l 347 521 l 868 521 l 868 868 z "
+    	},
+    	"ĝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	"ģ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 1215 l 694 1215 l 694 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	"ġ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	h: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"ħ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 868 1215 l 868 1042 l 521 1042 l 521 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 694 l 521 694 l 521 174 l 174 174 z "
+    	},
+    	"ĥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 694 l 347 694 l 347 174 l 0 174 z "
+    	},
+    	i: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ı": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"í": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 694 l 347 694 l 347 868 l 868 868 l 868 347 l 1215 347 z "
+    	},
+    	"ĭ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 347 1215 l 174 1215 l 174 1389 l 347 1389 l 347 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 347 1042 l 347 1215 l 868 1215 l 868 1042 l 347 1042 m 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 694 l 347 694 l 347 868 l 868 868 l 868 347 l 1215 347 z "
+    	},
+    	"î": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 174 1042 m 174 174 l 174 347 l 521 347 l 521 694 l 347 694 l 347 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ï": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ì": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 521 1042 l 521 1215 l 694 1215 l 694 1042 l 521 1042 m 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 694 l 347 694 l 347 868 l 868 868 l 868 347 l 1215 347 z "
+    	},
+    	"ĳ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 868 1215 m 174 347 l 174 868 l 0 868 l 0 1042 l 521 1042 l 521 347 l 174 347 m 347 0 l 347 174 l 868 174 l 868 868 l 694 868 l 694 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 347 0 z "
+    	},
+    	"ī": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"į": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 521 1215 l 521 1389 l 868 1389 l 868 1215 m 1215 694 l 1215 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 521 694 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 694 l 1215 694 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"ĩ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 1389 l 694 1215 l 347 1215 l 347 1389 l 694 1389 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 174 1215 l 347 1215 l 347 1042 l 174 1042 l 174 1215 m 694 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 m 868 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 521 347 l 521 694 l 347 694 l 347 868 l 868 868 l 868 347 z "
+    	},
+    	j: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 0 l 174 174 l 694 174 l 694 868 l 521 868 l 521 1042 l 1042 1042 l 1042 174 l 868 174 l 868 0 l 174 0 z "
+    	},
+    	"ĵ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 347 1042 l 347 1215 l 521 1215 l 521 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 694 1215 l 694 1042 l 347 1042 m 174 0 l 174 174 l 694 174 l 694 694 l 521 694 l 521 868 l 1042 868 l 1042 174 l 868 174 l 868 0 l 174 0 z "
+    	},
+    	k: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"ķ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 347 l 0 1389 l 347 1389 l 347 868 l 694 868 l 694 1042 l 868 1042 l 868 1215 l 1215 1215 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 868 347 l 868 521 l 694 521 l 694 694 l 347 694 l 347 347 l 0 347 m 174 0 l 174 174 l 347 174 l 347 347 l 694 347 l 694 174 l 521 174 l 521 0 l 174 0 z "
+    	},
+    	"ĸ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	l: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 347 1215 l 347 1389 l 868 1389 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ĺ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1042,
+    		o: "m 694 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 m 1042 347 l 1042 174 l 0 174 l 0 347 l 347 347 l 347 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 347 l 1042 347 z "
+    	},
+    	"ľ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 347 347 l 347 1215 l 174 1215 l 174 1389 l 694 1389 l 694 347 l 1042 347 l 1042 174 l 0 174 m 868 868 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 z "
+    	},
+    	"ļ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 174 l 521 174 l 521 347 l 174 347 l 174 521 l 521 521 l 521 1215 l 347 1215 l 347 1389 l 868 1389 l 868 521 l 1215 521 l 1215 347 l 868 347 l 868 174 l 694 174 l 694 0 l 347 0 z "
+    	},
+    	"ŀ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 347 347 l 347 1215 l 174 1215 l 174 1389 l 694 1389 l 694 347 l 1042 347 l 1042 174 l 0 174 m 868 694 l 868 1042 l 1215 1042 l 1215 694 l 868 694 z "
+    	},
+    	"ł": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 694 l 347 694 l 347 868 l 521 868 l 521 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1042 l 1042 1042 l 1042 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	m: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 868 174 l 868 868 l 694 868 l 694 174 l 347 174 l 347 868 l 174 868 l 174 174 l 0 174 z "
+    	},
+    	n: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"ń": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"ň": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"ņ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 347 l 868 347 l 868 1042 l 347 1042 l 347 347 l 0 347 l 0 1215 l 1042 1215 l 1042 1042 l 1215 1042 m 521 347 l 868 347 l 868 174 l 694 174 l 694 0 l 347 0 l 347 174 l 521 174 l 521 347 z "
+    	},
+    	"ŋ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 174 l 868 174 l 868 1042 l 347 1042 l 347 347 l 0 347 l 0 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 347 0 z "
+    	},
+    	"ñ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 m 347 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1042 z "
+    	},
+    	o: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"ó": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"ŏ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"ô": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"ö": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"ò": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"ő": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"ō": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"ø": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 347 l 868 347 l 868 694 l 694 694 l 694 868 l 347 868 l 347 521 l 521 521 l 521 347 m 521 521 l 521 694 l 694 694 l 694 521 l 521 521 z "
+    	},
+    	"õ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1042 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"œ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 694 521 l 694 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 521 347 l 521 868 l 347 868 l 347 347 m 694 694 l 868 694 l 868 868 l 694 868 l 694 694 z "
+    	},
+    	p: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 0 l 0 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 1042 521 l 1042 347 l 347 347 l 347 0 l 0 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	"þ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 0 l 0 1389 l 347 1389 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 1042 521 l 1042 347 l 347 347 l 347 0 l 0 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	q: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 0 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 0 l 868 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	r: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 868 l 694 868 l 694 694 l 521 694 l 521 174 l 174 174 l 174 1042 l 521 1042 l 521 868 m 1215 1042 l 1215 868 l 694 868 l 694 1042 l 1215 1042 z "
+    	},
+    	"ŕ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 174 l 174 174 l 174 1042 l 521 1042 l 521 868 m 1215 1042 l 1215 868 l 694 868 l 694 1042 l 1215 1042 z "
+    	},
+    	"ř": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 694 868 l 694 694 l 521 694 l 521 174 l 174 174 m 521 868 l 694 868 l 694 1042 l 521 1042 l 521 868 z "
+    	},
+    	"ŗ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1042 l 694 1042 l 694 868 l 521 868 l 521 347 l 694 347 l 694 174 l 521 174 l 521 0 l 174 0 l 174 174 l 347 174 l 347 347 l 174 347 l 174 1215 l 521 1215 l 521 1042 m 1215 1215 l 1215 1042 l 694 1042 l 694 1215 l 1215 1215 z "
+    	},
+    	s: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 z "
+    	},
+    	"ś": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 z "
+    	},
+    	"š": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 z "
+    	},
+    	"ş": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 694 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 694 174 l 694 347 l 0 347 l 0 521 l 868 521 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 174 1042 l 174 1215 l 1042 1215 l 1042 1042 l 347 1042 l 347 868 l 1042 868 l 1042 694 l 1215 694 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	"ŝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"ß": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 868 347 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1215 l 521 1215 l 521 521 l 694 521 l 694 347 l 521 347 l 521 174 l 174 174 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 z "
+    	},
+    	"ſ": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 1215 l 694 1215 l 694 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 174 l 521 174 z "
+    	},
+    	t: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 174 l 521 174 z "
+    	},
+    	"ŧ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 521 521 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 868 521 l 868 174 l 521 174 z "
+    	},
+    	"ť": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 868 l 1215 694 l 868 694 l 868 174 l 521 174 l 521 694 l 174 694 l 174 868 l 521 868 l 521 1215 l 868 1215 l 868 868 l 1215 868 z "
+    	},
+    	"ț": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 868 l 868 868 l 868 174 l 694 174 l 694 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	u: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 l 1215 174 l 174 174 z "
+    	},
+    	"ú": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 1215 1042 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"ŭ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 868 1042 l 347 1042 l 347 1215 l 868 1215 l 868 1042 m 1215 1042 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"û": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 174 1042 m 174 174 l 174 347 l 0 347 l 0 868 l 347 868 l 347 347 l 868 347 l 868 868 l 1215 868 l 1215 174 l 174 174 z "
+    	},
+    	"ü": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 l 1215 174 l 174 174 z "
+    	},
+    	"ù": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 521 1042 l 521 1215 l 694 1215 l 694 1042 l 521 1042 m 1215 1042 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"ű": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 347 l 868 347 l 868 1042 l 1215 1042 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 z "
+    	},
+    	"ū": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 l 1215 174 l 174 174 z "
+    	},
+    	"ų": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 0 694 l 0 1389 l 347 1389 l 347 694 l 868 694 l 868 1389 l 1215 1389 m 347 347 l 521 347 l 521 174 l 347 174 l 347 347 m 521 0 l 521 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"ů": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 174 174 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 868 347 l 868 868 l 1042 868 l 1042 1042 l 868 1042 l 868 868 l 347 868 l 347 1042 l 174 1042 l 174 868 l 347 868 l 347 347 z "
+    	},
+    	"ũ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 521 1042 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	v: {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 1042 l 521 1042 l 521 521 l 868 521 l 868 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 521 174 z "
+    	},
+    	w: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 m 694 1042 l 694 347 l 521 347 l 521 1042 l 694 1042 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"ŵ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 m 347 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 868 l 347 868 l 347 347 m 694 868 l 694 347 l 521 347 l 521 868 l 694 868 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 868 347 l 868 868 l 1215 868 z "
+    	},
+    	x: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 z "
+    	},
+    	y: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"ý": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 z "
+    	},
+    	"ŷ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 174 1042 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 347 868 l 347 521 l 868 521 l 868 868 l 1215 868 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"ÿ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	z: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"ź": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"ž": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"ż": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"ﬁ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 868 l 0 868 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 521 1215 l 521 1042 l 1215 1042 l 1215 174 l 868 174 l 868 868 l 521 868 l 521 174 l 174 174 z "
+    	},
+    	"ﬂ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 868 l 0 868 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1215 1389 l 1215 174 l 868 174 l 868 868 l 521 868 l 521 174 l 174 174 m 521 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"ª": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 694 l 347 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 694 l 347 694 m 521 868 l 694 868 l 694 1042 l 521 1042 l 521 868 z "
+    	},
+    	"º": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 694 l 347 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 868 l 868 868 l 868 694 l 347 694 m 521 868 l 694 868 l 694 1215 l 521 1215 l 521 868 z "
+    	},
+    	"А": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	"Б": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"В": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 868 l 868 868 l 868 1215 l 347 1215 l 347 868 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"Г": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 1215 l 521 1215 l 521 174 l 174 174 z "
+    	},
+    	"Ѓ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 694 l 1042 694 l 1042 868 l 521 868 l 521 174 l 174 174 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"Ґ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1389 l 1215 1389 l 1215 1042 l 521 1042 l 521 174 l 174 174 l 174 1215 l 868 1215 l 868 1389 z "
+    	},
+    	"Д": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 0 0 l 0 347 l 174 347 l 174 694 l 347 694 l 347 1389 l 1215 1389 l 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 347 174 l 347 0 l 0 0 m 521 347 l 868 347 l 868 1215 l 521 1215 l 521 347 z "
+    	},
+    	"Е": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 347 694 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ѐ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 l 0 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"Ё": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ж": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 868 l 174 868 l 174 1042 l 0 1042 l 0 1389 l 347 1389 m 694 868 l 868 868 l 868 694 l 694 694 l 694 174 l 521 174 l 521 694 l 347 694 l 347 868 l 521 868 l 521 1389 l 694 1389 l 694 868 m 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 1389 l 1215 1389 m 174 694 l 347 694 l 347 174 l 0 174 l 0 521 l 174 521 l 174 694 m 868 174 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 z "
+    	},
+    	"З": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 694 l 347 694 l 347 868 l 868 868 l 868 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"И": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 694 l 521 694 l 521 868 l 694 868 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 z "
+    	},
+    	"Й": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 1042 l 347 1042 l 347 521 l 521 521 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 347 l 521 347 l 521 174 l 0 174 z "
+    	},
+    	"Ѝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 521 1042 l 521 1215 l 694 1215 l 694 1042 l 521 1042 m 1215 1042 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 347 l 521 347 l 521 174 l 0 174 l 0 1042 l 347 1042 l 347 521 l 521 521 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 z "
+    	},
+    	"К": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1042 l 694 1042 l 694 868 l 868 868 l 868 694 l 1042 694 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 694 l 347 694 l 347 174 l 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1042 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 z "
+    	},
+    	"Ќ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 868 m 1215 1042 l 1215 868 l 868 868 l 868 1042 l 1215 1042 z "
+    	},
+    	"Л": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 1389 l 1215 1389 l 1215 174 l 868 174 l 868 1215 l 521 1215 l 521 347 l 347 347 l 347 174 l 0 174 z "
+    	},
+    	"М": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 868 l 694 868 l 694 521 l 521 521 l 521 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"Н": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 694 l 347 694 l 347 174 l 0 174 z "
+    	},
+    	"О": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 1215 l 347 1215 l 347 347 z "
+    	},
+    	"П": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 174 l 868 174 l 868 1215 l 347 1215 l 347 174 l 0 174 z "
+    	},
+    	"Р": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 694 l 1042 694 l 1042 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1215 l 347 1215 l 347 694 z "
+    	},
+    	"С": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 347 1042 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"Т": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 174 l 521 174 z "
+    	},
+    	"У": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ў": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"Ф": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 694 347 l 694 174 l 521 174 m 347 521 l 521 521 l 521 1042 l 347 1042 l 347 521 m 694 521 l 868 521 l 868 1042 l 694 1042 l 694 521 z "
+    	},
+    	"Х": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 174 868 l 174 1042 l 0 1042 l 0 1389 l 347 1389 l 347 1042 l 521 1042 l 521 868 l 694 868 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"Ч": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 174 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 174 l 868 174 z "
+    	},
+    	"Ц": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 0 l 868 174 l 0 174 l 0 1389 l 347 1389 l 347 347 l 694 347 l 694 1389 l 1042 1389 l 1042 347 l 1215 347 l 1215 0 l 868 0 z "
+    	},
+    	"Ш": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 347 l 521 347 l 521 1389 l 694 1389 l 694 347 l 868 347 l 868 1389 l 1215 1389 l 1215 174 l 0 174 z "
+    	},
+    	"Щ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1042 0 l 1042 174 l 0 174 l 0 1389 l 347 1389 l 347 347 l 521 347 l 521 1389 l 694 1389 l 694 347 l 868 347 l 868 1389 l 1215 1389 l 1215 347 l 1389 347 l 1389 0 l 1042 0 z "
+    	},
+    	"Џ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 0 l 521 174 l 0 174 l 0 1389 l 347 1389 l 347 347 l 868 347 l 868 1389 l 1215 1389 l 1215 174 l 694 174 l 694 0 l 521 0 z "
+    	},
+    	"Ь": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"Ъ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1215 l 0 1215 l 0 1389 l 521 1389 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 347 l 868 347 l 868 868 l 521 868 l 521 347 z "
+    	},
+    	"Ы": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1042 l 694 1042 l 694 174 l 0 174 m 868 174 l 868 1389 l 1215 1389 l 1215 174 l 868 174 m 347 347 l 521 347 l 521 868 l 347 868 l 347 347 z "
+    	},
+    	"Љ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 174 l 521 174 l 521 1215 l 347 1215 l 347 174 l 0 174 m 868 347 l 1042 347 l 1042 868 l 868 868 l 868 347 z "
+    	},
+    	"Њ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 174 l 521 174 l 521 694 l 347 694 l 347 174 l 0 174 m 868 347 l 1042 347 l 1042 868 l 868 868 l 868 347 z "
+    	},
+    	"Ѕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Є": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 347 1042 l 347 868 l 1042 868 l 1042 694 l 347 694 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"Э": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 694 347 l 694 521 l 868 521 l 868 694 l 174 694 l 174 868 l 868 868 l 868 1042 l 694 1042 l 694 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 174 174 z "
+    	},
+    	"І": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ї": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 868 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ј": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ћ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1215 l 0 1215 l 0 1389 l 868 1389 l 868 1215 l 521 1215 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 868 174 l 868 868 l 521 868 l 521 174 l 174 174 z "
+    	},
+    	"Ю": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 174 1389 l 174 868 l 347 868 l 347 1215 l 521 1215 l 521 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 521 174 l 521 347 l 347 347 l 347 694 l 174 694 l 174 174 l 0 174 m 694 347 l 868 347 l 868 1215 l 694 1215 l 694 347 z "
+    	},
+    	"Я": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 0 694 l 0 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 174 l 868 174 l 868 521 l 521 521 l 521 174 l 0 174 m 521 694 l 868 694 l 868 1215 l 347 1215 l 347 868 l 521 868 l 521 694 z "
+    	},
+    	"Ђ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 0 l 694 174 l 868 174 l 868 868 l 521 868 l 521 174 l 174 174 l 174 1215 l 0 1215 l 0 1389 l 868 1389 l 868 1215 l 521 1215 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 1042 174 l 1042 0 l 694 0 z "
+    	},
+    	"Ѣ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 868 1215 l 868 1042 l 521 1042 l 521 868 l 1042 868 l 1042 694 l 1215 694 m 868 694 l 521 694 l 521 347 l 868 347 l 868 694 z "
+    	},
+    	"Ѫ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1042 l 1042 1042 l 1042 1215 l 174 1215 l 174 1042 l 0 1042 l 0 1389 l 1215 1389 m 174 1042 l 347 1042 l 347 868 l 174 868 l 174 1042 m 868 868 l 868 1042 l 1042 1042 l 1042 868 l 868 868 m 347 868 l 868 868 l 868 694 l 694 694 l 694 174 l 521 174 l 521 694 l 347 694 l 347 868 m 174 694 l 347 694 l 347 174 l 0 174 l 0 521 l 174 521 l 174 694 m 868 174 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 z "
+    	},
+    	"Ѳ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 1215 l 347 1215 l 347 347 m 174 694 l 1042 694 l 1042 868 l 174 868 l 174 694 z "
+    	},
+    	"Ѵ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 1389 l 347 1389 l 347 694 l 521 694 l 521 521 l 694 521 l 694 694 l 868 694 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 521 l 868 521 l 868 347 l 694 347 l 694 174 l 521 174 z "
+    	},
+    	"Ғ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1042 l 1042 1042 l 1042 1215 l 521 1215 l 521 868 l 868 868 l 868 694 l 521 694 l 521 174 l 174 174 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1389 l 1215 1389 z "
+    	},
+    	"Ҕ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1042 l 1042 1042 l 1042 1215 l 521 1215 l 521 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 1042 174 l 1042 0 l 694 0 l 694 174 l 868 174 l 868 694 l 521 694 l 521 174 l 174 174 l 174 1389 l 1215 1389 z "
+    	},
+    	"Җ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 347 1389 l 347 868 l 174 868 l 174 1042 l 0 1042 l 0 1389 l 347 1389 m 868 868 l 868 694 l 694 694 l 694 174 l 521 174 l 521 694 l 347 694 l 347 868 l 521 868 l 521 1389 l 694 1389 l 694 868 l 868 868 m 1042 868 l 868 868 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 m 174 694 l 347 694 l 347 174 l 0 174 l 0 521 l 174 521 l 174 694 m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 z "
+    	},
+    	"Ҙ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 0 l 521 0 l 521 174 l 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 694 l 347 694 l 347 868 l 868 868 l 868 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 z "
+    	},
+    	"Қ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1042 l 694 1042 l 694 868 l 868 868 l 868 694 l 1042 694 l 1042 347 l 1215 347 l 1215 0 l 868 0 l 868 347 l 694 347 l 694 694 l 347 694 l 347 174 l 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1042 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 z "
+    	},
+    	"Ҝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 868 l 868 868 l 868 694 l 694 694 l 694 521 l 521 521 l 521 694 l 347 694 l 347 174 l 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 868 m 1042 1215 l 1042 868 l 868 868 l 868 1389 l 1215 1389 l 1215 1215 l 1042 1215 m 1215 174 l 868 174 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 z "
+    	},
+    	"Ҡ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1042 l 868 694 l 1042 694 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 694 l 521 694 l 521 174 l 174 174 l 174 1215 l 0 1215 l 0 1389 l 521 1389 l 521 868 l 694 868 l 694 1042 l 868 1042 m 1042 1215 l 1042 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 1215 l 1042 1215 z "
+    	},
+    	"Ң": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 694 l 347 694 l 347 174 l 0 174 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 347 z "
+    	},
+    	"Ԥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 1215 l 347 1215 l 347 174 l 0 174 l 0 1389 l 1215 1389 l 1215 347 z "
+    	},
+    	"Ҫ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 347 1042 l 347 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 868 174 l 868 0 l 521 0 l 521 174 l 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 z "
+    	},
+    	"Ҭ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 868 1215 l 868 347 l 1042 347 l 1042 0 l 694 0 l 694 174 l 521 174 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 z "
+    	},
+    	"Ү": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 694 l 347 694 l 347 868 l 174 868 l 174 1389 l 521 1389 l 521 868 l 868 868 l 868 1389 l 1215 1389 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 174 l 521 174 z "
+    	},
+    	"Ұ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 521 174 l 521 347 l 347 347 l 347 521 l 521 521 l 521 694 l 347 694 l 347 868 l 174 868 l 174 1389 l 521 1389 l 521 868 l 868 868 l 868 1389 l 1215 1389 z "
+    	},
+    	"Ҷ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 347 z "
+    	},
+    	"Ҹ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 521 l 521 521 l 521 694 l 174 694 l 174 868 l 0 868 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 868 l 868 868 l 868 1389 l 1215 1389 z "
+    	},
+    	"Һ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1389,
+    		o: "m 174 174 l 174 1389 l 521 1389 l 521 868 l 1215 868 l 1215 694 l 1389 694 l 1389 174 l 1042 174 l 1042 694 l 521 694 l 521 174 l 174 174 z "
+    	},
+    	"Ӏ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ӂ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 694 1042 l 694 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"Ӌ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 694 l 174 694 l 174 868 l 0 868 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 347 z "
+    	},
+    	"Ӑ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 m 347 521 l 868 521 l 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 z "
+    	},
+    	"Ӓ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 347 l 347 347 l 347 174 l 0 174 m 347 521 l 868 521 l 868 694 l 694 694 l 694 868 l 521 868 l 521 694 l 347 694 l 347 521 z "
+    	},
+    	"Ӗ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ә": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 868 868 l 868 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 868 347 l 868 694 l 347 694 l 347 347 l 868 347 z "
+    	},
+    	"Ӝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 694 1042 l 694 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"Ӟ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 521 l 521 521 l 521 694 l 868 694 l 868 868 l 347 868 l 347 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ӣ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 1042 l 347 1042 l 347 521 l 521 521 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 347 l 521 347 l 521 174 l 0 174 z "
+    	},
+    	"Ӥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 1042 l 347 1042 l 347 521 l 521 521 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 347 l 521 347 l 521 174 l 0 174 z "
+    	},
+    	"Ӧ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"Ө": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 1215 l 347 1215 l 347 347 m 174 694 l 1042 694 l 1042 868 l 174 868 l 174 694 z "
+    	},
+    	"Ӯ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ӱ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"Ӳ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 868 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 694 l 868 694 l 868 1042 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 z "
+    	},
+    	"Ӵ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 868 174 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 174 l 868 174 z "
+    	},
+    	"Ӷ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1042 l 1042 1042 l 1042 1215 l 521 1215 l 521 347 l 694 347 l 694 0 l 347 0 l 347 174 l 174 174 l 174 1389 l 1215 1389 z "
+    	},
+    	"Ӹ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 1042 l 347 1042 l 347 868 l 694 868 l 694 174 l 0 174 m 868 174 l 868 1042 l 1215 1042 l 1215 174 l 868 174 m 347 347 l 521 347 l 521 694 l 347 694 l 347 347 z "
+    	},
+    	"Ԛ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 868 1215 l 347 1215 l 347 347 l 694 347 l 694 521 l 521 521 l 521 694 l 868 694 l 868 1215 m 1042 174 l 1042 347 l 1215 347 l 1215 174 l 1042 174 z "
+    	},
+    	"Ԝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1389 l 347 1389 l 347 694 l 521 694 l 521 1389 l 694 1389 l 694 694 l 868 694 l 868 1389 l 1215 1389 l 1215 347 l 1042 347 l 1042 174 l 868 174 l 868 347 l 694 347 l 694 521 l 521 521 l 521 347 l 347 347 l 347 174 l 174 174 z "
+    	},
+    	"а": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"б": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 347 1215 l 347 868 l 521 868 l 521 694 l 347 694 l 347 347 l 868 347 l 868 868 l 521 868 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1215 1389 z "
+    	},
+    	"в": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"г": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 868 l 521 868 l 521 174 l 174 174 z "
+    	},
+    	"ѓ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 694 l 1042 694 l 1042 868 l 521 868 l 521 174 l 174 174 l 174 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1042 l 1215 1042 z "
+    	},
+    	"ґ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1215 l 1215 1215 l 1215 868 l 521 868 l 521 174 l 174 174 l 174 1042 l 868 1042 l 868 1215 z "
+    	},
+    	"д": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 347 174 l 347 0 l 0 0 l 0 347 l 174 347 l 174 521 l 347 521 l 347 1042 l 1215 1042 l 1215 347 m 521 347 l 868 347 l 868 868 l 521 868 l 521 347 z "
+    	},
+    	"е": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ѐ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 521 1215 l 347 1215 l 347 1389 l 521 1389 m 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 694 l 868 694 l 868 868 z "
+    	},
+    	"ё": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ж": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 694 1042 l 694 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"з": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 521 l 521 521 l 521 694 l 868 694 l 868 868 l 347 868 l 347 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"и": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 521 m 1215 1042 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 m 521 694 l 694 694 l 694 521 l 521 521 l 521 694 z "
+    	},
+    	"й": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1042 1389 l 1042 1215 l 174 1215 l 174 1389 l 1042 1389 m 347 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 521 m 1215 1042 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 m 521 694 l 694 694 l 694 521 l 521 521 l 521 694 z "
+    	},
+    	"ѝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 521 1042 l 521 1215 l 694 1215 l 694 1042 l 521 1042 m 347 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 521 m 1215 1042 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 m 521 694 l 694 694 l 694 521 l 521 521 l 521 694 z "
+    	},
+    	"к": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 868 m 1215 1042 l 1215 868 l 868 868 l 868 1042 l 1215 1042 z "
+    	},
+    	"ќ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 868 m 1215 1042 l 1215 868 l 868 868 l 868 1042 l 1215 1042 z "
+    	},
+    	"л": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 174 l 868 174 l 868 868 l 521 868 l 521 347 l 347 347 l 347 174 l 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 1042 l 1215 1042 z "
+    	},
+    	"м": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 868 l 521 694 l 347 694 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 868 l 521 868 m 1215 1042 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 m 521 694 l 694 694 l 694 347 l 521 347 l 521 694 z "
+    	},
+    	"н": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"о": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"п": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 1215 1042 l 1215 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"р": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 347 174 l 347 0 l 0 0 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 694 l 347 694 l 347 347 l 868 347 l 868 868 l 521 868 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"с": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 868 l 347 868 l 347 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"т": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 174 l 521 174 z "
+    	},
+    	"у": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"ў": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"ф": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 0 l 521 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 0 l 521 0 m 347 347 l 521 347 l 521 868 l 347 868 l 347 347 m 694 347 l 868 347 l 868 868 l 694 868 l 694 347 z "
+    	},
+    	"х": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 z "
+    	},
+    	"ч": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 174 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 174 l 868 174 z "
+    	},
+    	"ц": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 0 l 868 174 l 0 174 l 0 1042 l 347 1042 l 347 347 l 694 347 l 694 1042 l 1042 1042 l 1042 347 l 1215 347 l 1215 0 l 868 0 z "
+    	},
+    	"ш": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 347 l 521 347 l 521 1042 l 694 1042 l 694 347 l 868 347 l 868 1042 l 1215 1042 l 1215 174 l 0 174 z "
+    	},
+    	"щ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1042 0 l 1042 174 l 0 174 l 0 1042 l 347 1042 l 347 347 l 521 347 l 521 1042 l 694 1042 l 694 347 l 868 347 l 868 1042 l 1215 1042 l 1215 347 l 1389 347 l 1389 0 l 1042 0 z "
+    	},
+    	"џ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 0 l 521 174 l 0 174 l 0 1042 l 347 1042 l 347 347 l 868 347 l 868 1042 l 1215 1042 l 1215 174 l 694 174 l 694 0 l 521 0 z "
+    	},
+    	"ь": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ъ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 868 l 0 868 l 0 1042 l 521 1042 l 521 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 521 347 l 868 347 l 868 521 l 521 521 l 521 347 z "
+    	},
+    	"ы": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 174 l 0 174 m 868 174 l 868 1042 l 1215 1042 l 1215 174 l 868 174 m 347 347 l 521 347 l 521 521 l 347 521 l 347 347 z "
+    	},
+    	"љ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 1042 l 868 1042 l 868 868 l 1215 868 l 1215 174 l 521 174 l 521 868 l 347 868 l 347 174 l 0 174 m 868 347 l 1042 347 l 1042 694 l 868 694 l 868 347 z "
+    	},
+    	"њ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 868 1042 l 868 868 l 1215 868 l 1215 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 m 868 347 l 1042 347 l 1042 694 l 868 694 l 868 347 z "
+    	},
+    	"ѕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 868 347 l 868 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 0 174 z "
+    	},
+    	"є": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 868 l 347 868 l 347 694 l 694 694 l 694 521 l 347 521 l 347 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"э": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 521 l 521 521 l 521 694 l 868 694 l 868 868 l 347 868 l 347 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"і": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ї": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 347 868 l 347 1042 l 868 1042 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ј": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 0 l 174 174 l 694 174 l 694 868 l 521 868 l 521 1042 l 1042 1042 l 1042 174 l 868 174 l 868 0 l 174 0 z "
+    	},
+    	"ћ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 868 1215 l 868 1042 l 521 1042 l 521 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 868 174 l 868 694 l 521 694 l 521 174 l 174 174 z "
+    	},
+    	"ю": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 694 l 347 694 l 347 868 l 521 868 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 174 l 0 174 m 694 347 l 868 347 l 868 868 l 694 868 l 694 347 z "
+    	},
+    	"я": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ђ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 0 l 694 174 l 868 174 l 868 694 l 521 694 l 521 174 l 174 174 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 868 1215 l 868 1042 l 521 1042 l 521 868 l 1042 868 l 1042 694 l 1215 694 l 1215 174 l 1042 174 l 1042 0 l 694 0 z "
+    	},
+    	"ѣ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 868 l 0 868 l 0 1042 l 174 1042 l 174 1389 l 521 1389 l 521 1042 l 868 1042 l 868 868 l 521 868 l 521 694 l 1042 694 l 1042 521 l 1215 521 m 868 521 l 521 521 l 521 347 l 868 347 l 868 521 z "
+    	},
+    	"ѫ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 868 l 347 868 l 347 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 868 m 347 694 l 868 694 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 694 m 0 174 l 0 521 l 347 521 l 347 174 l 0 174 m 1215 174 l 868 174 l 868 521 l 1215 521 l 1215 174 z "
+    	},
+    	"ѳ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 m 174 521 l 1042 521 l 1042 694 l 174 694 l 174 521 z "
+    	},
+    	"ѵ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 1042 l 521 1042 l 521 521 l 868 521 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 347 l 868 347 l 868 174 l 521 174 z "
+    	},
+    	"ғ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 694 l 1042 694 l 1042 868 l 521 868 l 521 694 l 868 694 l 868 521 l 521 521 l 521 174 l 174 174 l 174 521 l 0 521 l 0 694 l 174 694 l 174 1042 l 1215 1042 z "
+    	},
+    	"ҕ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 868 l 521 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 1042 174 l 1042 0 l 694 0 l 694 174 l 868 174 l 868 521 l 521 521 l 521 174 l 174 174 l 174 1042 l 1215 1042 l 1215 868 l 521 868 z "
+    	},
+    	"җ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 694 1042 l 694 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 z "
+    	},
+    	"ҙ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 0 l 521 0 l 521 174 l 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 521 l 521 521 l 521 694 l 868 694 l 868 868 l 347 868 l 347 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 z "
+    	},
+    	"қ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 m 1215 1042 l 1215 868 l 868 868 l 868 1042 l 1215 1042 z "
+    	},
+    	"ҝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 694 l 868 694 l 868 521 l 694 521 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 868 l 694 868 l 694 694 m 1042 868 l 1042 694 l 868 694 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 m 1215 174 l 868 174 l 868 521 l 1215 521 l 1215 174 z "
+    	},
+    	"ҡ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 521 521 l 521 174 l 174 174 l 174 868 l 0 868 l 0 1042 l 521 1042 l 521 694 l 694 694 l 694 868 m 1215 1042 l 1215 868 l 868 868 l 868 1042 l 1215 1042 z "
+    	},
+    	"ң": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 347 z "
+    	},
+    	"ԥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 868 l 347 868 l 347 174 l 0 174 l 0 1042 l 1215 1042 l 1215 347 z "
+    	},
+    	"ҫ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 694 l 868 694 l 868 868 l 347 868 l 347 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 0 l 521 0 l 521 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 z "
+    	},
+    	"ҭ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 868 l 868 868 l 868 347 l 1042 347 l 1042 0 l 694 0 l 694 174 l 521 174 l 521 868 l 174 868 l 174 1042 l 1215 1042 z "
+    	},
+    	"ү": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 0 l 521 0 l 521 347 l 347 347 l 347 521 l 174 521 l 174 1042 l 521 1042 l 521 521 l 868 521 l 868 1042 l 1215 1042 z "
+    	},
+    	"ұ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 347 l 1042 347 l 1042 174 l 868 174 l 868 0 l 521 0 l 521 174 l 347 174 l 347 347 l 521 347 l 521 521 l 347 521 l 347 694 l 174 694 l 174 1042 l 521 1042 l 521 694 l 868 694 l 868 1042 l 1215 1042 z "
+    	},
+    	"ҷ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 347 z "
+    	},
+    	"ҹ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 347 l 521 347 l 521 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 868 l 694 868 l 694 694 l 868 694 l 868 1042 l 1215 1042 z "
+    	},
+    	"һ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 868 l 521 868 l 521 694 l 347 694 l 347 174 l 0 174 l 0 1389 l 347 1389 l 347 868 m 1215 868 l 1215 174 l 868 174 l 868 868 l 521 868 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"ӏ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 347 1215 l 347 1389 l 868 1389 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ӂ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 694 1042 l 694 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"ӌ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1215 347 l 1389 347 l 1389 0 l 1042 0 l 1042 174 l 868 174 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 347 z "
+    	},
+    	"ӑ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ӓ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ӗ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 347 521 l 347 347 l 1042 347 l 1042 174 l 174 174 m 347 694 l 868 694 l 868 868 l 347 868 l 347 694 z "
+    	},
+    	"ә": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 694 l 868 694 l 868 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 521 l 347 521 l 347 347 z "
+    	},
+    	"ӝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 l 694 1042 l 694 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"ӟ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 521 l 347 521 l 347 347 l 868 347 l 868 521 l 521 521 l 521 694 l 868 694 l 868 868 l 347 868 l 347 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"ӣ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1042 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 m 347 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 521 m 1215 1042 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 m 521 694 l 694 694 l 694 521 l 521 521 l 521 694 z "
+    	},
+    	"ӥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 m 1042 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 m 347 521 l 521 521 l 521 347 l 347 347 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 521 m 1215 1042 l 1215 174 l 868 174 l 868 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 m 521 694 l 694 694 l 694 521 l 521 521 l 521 694 z "
+    	},
+    	"ӧ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"ө": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 m 174 521 l 1042 521 l 1042 694 l 174 694 l 174 521 z "
+    	},
+    	"ӯ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"ӱ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 347 1042 l 347 521 l 868 521 l 868 1042 l 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"ӳ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 347 1215 l 347 1389 l 521 1389 l 521 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 1215 1042 l 1215 174 l 1042 174 l 1042 0 l 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 521 l 868 521 l 868 1042 l 1215 1042 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 z "
+    	},
+    	"ӵ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 868 174 l 868 521 l 174 521 l 174 694 l 0 694 l 0 1042 l 347 1042 l 347 694 l 868 694 l 868 1042 l 1215 1042 l 1215 174 l 868 174 z "
+    	},
+    	"ӷ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 694 l 1042 694 l 1042 868 l 521 868 l 521 347 l 694 347 l 694 0 l 347 0 l 347 174 l 174 174 l 174 1042 l 1215 1042 z "
+    	},
+    	"ӹ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 174 l 0 174 m 868 174 l 868 1042 l 1215 1042 l 1215 174 l 868 174 m 347 347 l 521 347 l 521 521 l 347 521 l 347 347 z "
+    	},
+    	"ԛ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 0 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 0 l 868 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	"ԝ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 m 694 1042 l 694 347 l 521 347 l 521 1042 l 694 1042 m 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 868 347 l 868 1042 l 1215 1042 z "
+    	},
+    	"Ҥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 1215 l 868 1215 l 868 174 l 521 174 l 521 694 l 347 694 l 347 174 l 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1389 z "
+    	},
+    	"ҥ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 868 l 868 868 l 868 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 l 0 1042 l 347 1042 l 347 694 l 521 694 l 521 1042 z "
+    	},
+    	"Ӕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 868 l 1215 868 l 1215 694 l 868 694 l 868 347 l 1215 347 l 1215 174 l 521 174 l 521 521 l 347 521 l 347 174 l 0 174 m 347 694 l 521 694 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	"ӕ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 521 694 l 521 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 694 521 l 694 347 l 1042 347 l 1042 174 l 174 174 m 694 694 l 868 694 l 868 868 l 694 868 l 694 694 m 347 347 l 521 347 l 521 521 l 347 521 l 347 347 z "
+    	},
+    	"Α": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 868 174 l 868 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 694 z "
+    	},
+    	"Β": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 0 174 m 347 868 l 868 868 l 868 1215 l 347 1215 l 347 868 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"Γ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1389 l 1215 1389 l 1215 1215 l 521 1215 l 521 174 l 174 174 z "
+    	},
+    	"Δ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 0 174 m 347 347 l 868 347 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 347 z "
+    	},
+    	"Ε": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 1215 l 347 1215 l 347 868 l 1042 868 l 1042 694 l 347 694 l 347 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ζ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 0 1215 l 0 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 694 694 l 694 521 l 521 521 l 521 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Η": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 868 l 868 868 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 694 l 347 694 l 347 174 l 0 174 z "
+    	},
+    	"Θ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 868 l 868 868 l 868 1215 l 347 1215 l 347 868 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"Ι": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Κ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 694 868 l 694 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"Λ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 868 174 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 174 l 0 174 z "
+    	},
+    	"Μ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 868 l 694 868 l 694 521 l 521 521 l 521 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"Ν": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 347 1389 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 868 l 868 868 l 868 1389 l 1215 1389 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 868 l 347 868 l 347 174 l 0 174 z "
+    	},
+    	"Ξ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 1215 l 0 1389 l 1215 1389 l 1215 1215 l 0 1215 m 174 694 l 174 868 l 1042 868 l 1042 694 l 174 694 m 0 174 l 0 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"Ο": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 1215 l 347 1215 l 347 347 z "
+    	},
+    	"Π": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 174 l 868 174 l 868 1215 l 347 1215 l 347 174 l 0 174 z "
+    	},
+    	"Ρ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 694 l 1042 694 l 1042 521 l 347 521 l 347 174 l 0 174 m 347 694 l 868 694 l 868 1215 l 347 1215 l 347 694 z "
+    	},
+    	"Σ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 0 1215 l 0 1389 l 1215 1389 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 694 1042 l 694 868 l 1042 868 l 1042 694 l 694 694 l 694 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 174 l 0 174 z "
+    	},
+    	"Τ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 174 l 521 174 z "
+    	},
+    	"Υ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 694 l 347 694 l 347 868 l 174 868 l 174 1389 l 521 1389 l 521 868 l 868 868 l 868 1389 l 1215 1389 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 174 l 521 174 z "
+    	},
+    	"Φ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 694 347 l 694 174 l 521 174 m 347 521 l 521 521 l 521 1042 l 347 1042 l 347 521 m 694 521 l 868 521 l 868 1042 l 694 1042 l 694 521 z "
+    	},
+    	"Χ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 174 868 l 174 1042 l 0 1042 l 0 1389 l 347 1389 l 347 1042 l 521 1042 l 521 868 l 694 868 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"Ψ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 347 174 l 347 347 l 521 347 l 521 694 l 174 694 l 174 868 l 0 868 l 0 1389 l 347 1389 l 347 868 l 521 868 l 521 1389 l 868 1389 l 868 868 l 1042 868 l 1042 1389 l 1389 1389 l 1389 868 l 1215 868 l 1215 694 l 868 694 l 868 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"Ω": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 521 l 868 521 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 521 l 521 521 l 521 174 l 0 174 z "
+    	},
+    	"Ά": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1042 l 1215 174 l 868 174 l 868 521 l 521 521 l 521 174 l 174 174 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 m 347 1215 l 174 1215 l 174 1389 l 347 1389 l 347 1215 m 174 1215 l 174 1042 l 0 1042 l 0 1215 l 174 1215 m 868 1042 l 521 1042 l 521 694 l 868 694 l 868 1042 z "
+    	},
+    	"Έ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1389 1389 l 1389 1215 l 694 1215 l 694 868 l 1042 868 l 1042 694 l 694 694 l 694 347 l 1389 347 l 1389 174 l 347 174 l 347 1215 l 174 1215 l 174 1389 l 1389 1389 m 0 1215 l 174 1215 l 174 1042 l 0 1042 l 0 1215 z "
+    	},
+    	"Ή": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1389 1389 l 1389 174 l 1042 174 l 1042 694 l 694 694 l 694 174 l 347 174 l 347 1215 l 174 1215 l 174 1389 l 694 1389 l 694 868 l 1042 868 l 1042 1389 l 1389 1389 m 0 1215 l 174 1215 l 174 1042 l 0 1042 l 0 1215 z "
+    	},
+    	"Ί": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1389 l 347 1389 l 347 1215 l 174 1215 l 174 1389 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 347 l 1215 347 l 1215 174 l 521 174 l 521 347 l 694 347 l 694 1215 l 521 1215 l 521 1389 l 1215 1389 m 0 1215 l 174 1215 l 174 1042 l 0 1042 l 0 1215 z "
+    	},
+    	"Ό": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1389 1215 l 1389 347 l 1215 347 l 1215 174 l 521 174 l 521 347 l 347 347 l 347 1215 l 521 1215 l 521 1389 l 1215 1389 l 1215 1215 l 1389 1215 m 0 1215 l 174 1215 l 174 1042 l 0 1042 l 0 1215 m 1042 1215 l 694 1215 l 694 347 l 1042 347 l 1042 1215 z "
+    	},
+    	"Ύ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1389 1389 l 1389 868 l 1215 868 l 1215 694 l 1042 694 l 1042 174 l 694 174 l 694 694 l 521 694 l 521 868 l 347 868 l 347 1215 l 174 1215 l 174 1389 l 694 1389 l 694 868 l 1042 868 l 1042 1389 l 1389 1389 m 0 1215 l 174 1215 l 174 1042 l 0 1042 l 0 1215 z "
+    	},
+    	"Ώ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1389 1042 l 1389 521 l 1215 521 l 1215 347 l 1389 347 l 1389 174 l 868 174 l 868 521 l 1042 521 l 1042 1042 l 868 1042 l 868 1215 l 694 1215 l 694 1042 l 521 1042 l 521 521 l 694 521 l 694 174 l 174 174 l 174 347 l 347 347 l 347 521 l 174 521 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 1389 1042 m 347 1215 l 174 1215 l 174 1389 l 347 1389 l 347 1215 m 174 1215 l 174 1042 l 0 1042 l 0 1215 l 174 1215 z "
+    	},
+    	"Ϊ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 868 1215 m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"Ϋ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 868 1215 l 868 1389 l 1215 1389 l 1215 1215 l 868 1215 m 521 174 l 521 521 l 347 521 l 347 694 l 174 694 l 174 1042 l 521 1042 l 521 694 l 868 694 l 868 1042 l 1215 1042 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 174 l 521 174 z "
+    	},
+    	"α": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"β": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 0 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 347 174 l 347 0 l 0 0 m 347 868 l 868 868 l 868 1215 l 347 1215 l 347 868 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"γ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 0 l 521 347 l 347 347 l 347 521 l 174 521 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 521 l 868 521 l 868 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 0 l 521 0 z "
+    	},
+    	"δ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 694 l 174 694 l 174 868 l 694 868 l 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"ε": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"ζ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 0 l 694 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 694 1215 l 694 1042 l 521 1042 l 521 868 l 347 868 l 347 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 1042 174 l 1042 0 l 694 0 z "
+    	},
+    	"η": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 868 l 521 868 l 521 174 l 174 174 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 m 1215 868 l 1215 0 l 868 0 l 868 868 l 521 868 l 521 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"θ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 347 174 m 347 868 l 868 868 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 868 m 521 347 l 694 347 l 694 521 l 868 521 l 868 694 l 347 694 l 347 521 l 521 521 l 521 347 z "
+    	},
+    	"ι": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 868 l 174 868 l 174 1042 l 694 1042 l 694 347 l 1042 347 l 1042 174 l 521 174 z "
+    	},
+    	"κ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 347 1042 l 347 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"λ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 694 l 347 694 l 347 1042 l 174 1042 l 174 1215 l 0 1215 l 0 1389 l 347 1389 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 174 l 868 174 l 868 521 l 694 521 l 694 694 l 521 694 l 521 521 l 347 521 l 347 174 l 0 174 z "
+    	},
+    	"μ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 347 l 694 347 l 694 174 l 347 174 l 347 0 l 0 0 l 0 1042 l 347 1042 l 347 347 m 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 1042 l 1042 1042 l 1042 347 l 1215 347 z "
+    	},
+    	"ν": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 521 l 868 521 l 868 1042 l 1215 1042 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 521 174 z "
+    	},
+    	"ξ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1042,
+    		o: "m 521 0 l 521 174 l 694 174 l 694 347 l 174 347 l 174 521 l 0 521 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 0 1215 l 0 1389 l 1042 1389 l 1042 1215 l 521 1215 l 521 1042 l 868 1042 l 868 868 l 521 868 l 521 694 l 347 694 l 347 521 l 868 521 l 868 347 l 1042 347 l 1042 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"ο": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 868 l 347 868 l 347 347 z "
+    	},
+    	"π": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 868 l 0 868 l 0 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 347 l 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 868 l 521 868 l 521 174 l 0 174 z "
+    	},
+    	"ρ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 0 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 1042 521 l 1042 347 l 347 347 l 347 0 l 0 0 m 347 521 l 868 521 l 868 868 l 347 868 l 347 521 z "
+    	},
+    	"ς": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 0 l 174 174 l 868 174 l 868 347 l 174 347 l 174 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 1042 1042 l 1042 868 l 347 868 l 347 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 1042 174 l 1042 0 l 174 0 z "
+    	},
+    	"σ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 694 l 1042 694 l 1042 347 l 868 347 l 868 174 l 174 174 m 347 347 l 694 347 l 694 694 l 521 694 l 521 868 l 347 868 l 347 347 z "
+    	},
+    	"τ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 174 l 694 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 1215 347 l 1215 174 l 694 174 z "
+    	},
+    	"υ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 347 l 868 347 l 868 868 l 694 868 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"φ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 0 l 521 0 l 521 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 347 l 521 347 l 521 868 l 694 868 l 694 347 l 868 347 l 868 868 l 694 868 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"χ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 0 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 0 l 868 0 l 868 347 l 694 347 l 694 521 l 521 521 l 521 347 l 347 347 l 347 0 l 0 0 z "
+    	},
+    	"ψ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 521 0 l 521 174 l 174 174 l 174 347 l 0 347 l 0 1042 l 347 1042 l 347 347 l 521 347 l 521 1215 l 868 1215 l 868 347 l 1042 347 l 1042 1042 l 1389 1042 l 1389 347 l 1215 347 l 1215 174 l 868 174 l 868 0 l 521 0 z "
+    	},
+    	"ω": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 347 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 868 347 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 694 868 l 694 347 l 521 347 l 521 868 l 694 868 z "
+    	},
+    	"ί": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 694 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 m 1042 347 l 1042 174 l 521 174 l 521 347 l 347 347 l 347 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 347 l 1042 347 z "
+    	},
+    	"ϊ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1042,
+    		o: "m 0 1215 l 0 1389 l 347 1389 l 347 1215 l 0 1215 m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 521 174 l 521 347 l 347 347 l 347 868 l 174 868 l 174 1042 l 694 1042 l 694 347 l 1042 347 l 1042 174 l 521 174 z "
+    	},
+    	"ΐ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1042,
+    		o: "m 174 1215 l 0 1215 l 0 1389 l 174 1389 l 174 1215 m 694 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 m 1042 1389 l 1042 1215 l 868 1215 l 868 1389 l 1042 1389 m 694 347 l 1042 347 l 1042 174 l 521 174 l 521 347 l 347 347 l 347 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1042 l 694 1042 l 694 347 z "
+    	},
+    	"ύ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1215 l 694 1042 l 521 1042 l 521 1215 l 694 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 347 174 l 347 347 l 174 347 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 347 l 868 347 l 868 868 l 694 868 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"ϋ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 m 347 174 l 347 347 l 174 347 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 347 l 868 347 l 868 868 l 694 868 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"ΰ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1215 l 0 1215 l 0 1389 l 174 1389 l 174 1215 m 694 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 521 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1042 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 347 174 l 347 347 l 174 347 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 l 521 868 l 521 347 l 868 347 l 868 868 l 694 868 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 z "
+    	},
+    	"ό": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"ώ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 694 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 m 347 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 347 m 1215 868 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 868 347 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 m 694 868 l 694 347 l 521 347 l 521 868 l 694 868 z "
+    	},
+    	"ά": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 m 868 868 l 347 868 l 347 347 l 868 347 l 868 868 z "
+    	},
+    	"έ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 1042 l 1215 868 l 347 868 l 347 694 l 1042 694 l 1042 521 l 347 521 l 347 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1042 l 1215 1042 z "
+    	},
+    	"ή": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1215 868 l 1215 0 l 868 0 l 868 868 l 521 868 l 521 1215 l 694 1215 l 694 1042 l 1042 1042 l 1042 868 l 1215 868 m 347 868 l 521 868 l 521 174 l 174 174 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 868 z "
+    	},
+    	"ͺ": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 1042,
+    		o: "m 694 347 l 694 174 l 521 174 l 521 347 l 694 347 m 1042 174 l 1042 0 l 694 0 l 694 174 l 1042 174 z "
+    	},
+    	"¹": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 347 694 l 347 868 l 521 868 l 521 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 868 l 1042 868 l 1042 694 l 347 694 z "
+    	},
+    	"²": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 347 694 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 347 694 z "
+    	},
+    	"³": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 347 694 l 347 868 l 694 868 l 694 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 347 694 z "
+    	},
+    	"⁴": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 694 694 l 694 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 868 1389 l 868 694 l 694 694 z "
+    	},
+    	"⁄": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"½": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 694 l 174 694 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 347 1389 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 868 694 l 868 868 l 1215 868 l 1215 521 l 1042 521 l 1042 694 l 868 694 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 694 174 l 694 347 l 868 347 l 868 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"¼": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 694 l 174 694 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 347 1389 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 1042 868 l 1215 868 l 1215 174 l 1042 174 l 1042 347 l 694 347 l 694 521 l 868 521 l 868 694 l 1042 694 l 1042 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"¾": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1215 l 347 1042 l 174 1042 l 174 1215 l 0 1215 l 0 1389 l 521 1389 l 521 1215 l 347 1215 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 521 868 l 347 868 l 347 1042 l 521 1042 l 521 868 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 347 868 l 347 694 l 0 694 l 0 868 l 347 868 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 1042 868 l 1215 868 l 1215 174 l 1042 174 l 1042 347 l 694 347 l 694 521 l 868 521 l 868 694 l 1042 694 l 1042 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"*": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 347 l 174 521 l 347 521 l 347 694 l 0 694 l 0 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 521 1215 l 521 1042 l 694 1042 l 694 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 1215 868 l 1215 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 694 347 l 694 521 l 521 521 l 521 347 l 174 347 z "
+    	},
+    	"\\": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 1389 l 174 1215 l 0 1215 l 0 1389 l 174 1389 m 347 1215 l 347 1042 l 174 1042 l 174 1215 l 347 1215 m 521 1042 l 521 868 l 347 868 l 347 1042 l 521 1042 m 694 868 l 694 694 l 521 694 l 521 868 l 694 868 m 868 694 l 868 521 l 694 521 l 694 694 l 868 694 m 1042 521 l 1042 347 l 868 347 l 868 521 l 1042 521 m 1215 347 l 1215 174 l 1042 174 l 1042 347 l 1215 347 z "
+    	},
+    	"·": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 694,
+    		o: "m 347 521 l 347 868 l 694 868 l 694 521 l 347 521 z "
+    	},
+    	"•": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 521 347 l 521 521 l 347 521 l 347 868 l 521 868 l 521 1042 l 868 1042 l 868 868 l 1042 868 l 1042 521 l 868 521 l 868 347 l 521 347 z "
+    	},
+    	":": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 694,
+    		o: "m 347 868 l 347 1215 l 694 1215 l 694 868 l 347 868 m 347 347 l 347 694 l 694 694 l 694 347 l 347 347 z "
+    	},
+    	",": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 694,
+    		o: "m 174 0 l 174 174 l 347 174 l 347 521 l 694 521 l 694 174 l 521 174 l 521 0 l 174 0 z "
+    	},
+    	"…": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 521 l 174 521 l 174 174 l 0 174 m 521 174 l 521 521 l 694 521 l 694 174 l 521 174 m 1042 174 l 1042 521 l 1215 521 l 1215 174 l 1042 174 z "
+    	},
+    	"!": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 347 521 l 347 1389 l 868 1389 l 868 868 l 694 868 l 694 521 l 347 521 m 347 174 l 347 347 l 694 347 l 694 174 l 347 174 z "
+    	},
+    	"¡": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 m 347 174 l 347 694 l 521 694 l 521 1042 l 868 1042 l 868 174 l 347 174 z "
+    	},
+    	"#": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 1042 1042 l 1042 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 521 347 l 521 174 l 174 174 m 521 521 l 694 521 l 694 1042 l 521 1042 l 521 521 z "
+    	},
+    	".": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 694,
+    		o: "m 347 174 l 347 521 l 694 521 l 694 174 l 347 174 z "
+    	},
+    	"?": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 521 l 347 694 l 694 694 l 694 868 l 868 868 l 868 1042 l 347 1042 l 347 868 l 0 868 l 0 1215 l 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 347 521 m 347 174 l 347 347 l 868 347 l 868 174 l 347 174 z "
+    	},
+    	"¿": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1215 l 347 1389 l 868 1389 l 868 1215 l 347 1215 m 174 174 l 174 347 l 0 347 l 0 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 868 1042 l 868 868 l 521 868 l 521 694 l 347 694 l 347 521 l 868 521 l 868 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"\"": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 868 l 174 1389 l 521 1389 l 521 868 l 174 868 m 694 868 l 694 1389 l 1042 1389 l 1042 868 l 694 868 z "
+    	},
+    	"'": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 694,
+    		o: "m 347 868 l 347 1389 l 694 1389 l 694 868 l 347 868 z "
+    	},
+    	";": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 694,
+    		o: "m 347 868 l 347 1215 l 694 1215 l 694 868 l 347 868 m 174 174 l 174 347 l 347 347 l 347 694 l 694 694 l 694 347 l 521 347 l 521 174 l 174 174 z "
+    	},
+    	"/": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	_: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 0 l 0 174 l 1215 174 l 1215 0 l 0 0 z "
+    	},
+    	"{": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 694 174 l 694 347 l 521 347 l 521 694 l 347 694 l 347 868 l 521 868 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 868 l 694 868 l 694 694 l 868 694 l 868 347 l 1042 347 l 1042 174 l 694 174 z "
+    	},
+    	"}": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 868,
+    		o: "m 174 174 l 174 347 l 347 347 l 347 694 l 521 694 l 521 868 l 347 868 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 868 l 868 868 l 868 694 l 694 694 l 694 347 l 521 347 l 521 174 l 174 174 z "
+    	},
+    	"[": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 347 174 l 347 1389 l 1042 1389 l 1042 1215 l 694 1215 l 694 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"]": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 868,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 1215 l 174 1215 l 174 1389 l 868 1389 l 868 174 l 174 174 z "
+    	},
+    	"(": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 694 1042 l 694 521 l 868 521 l 868 347 l 1042 347 l 1042 174 l 694 174 z "
+    	},
+    	")": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 868,
+    		o: "m 174 174 l 174 347 l 347 347 l 347 521 l 521 521 l 521 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1042 l 868 1042 l 868 521 l 694 521 l 694 347 l 521 347 l 521 174 l 174 174 z "
+    	},
+    	"—": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 0 694 l 0 868 l 1389 868 l 1389 694 l 0 694 z "
+    	},
+    	"–": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 694 l 0 868 l 1215 868 l 1215 694 l 0 694 z "
+    	},
+    	"―": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 694 l 0 868 l 1215 868 l 1215 694 l 0 694 z "
+    	},
+    	"-": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 694 l 174 868 l 1215 868 l 1215 694 l 174 694 z "
+    	},
+    	"­": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 694 l 174 868 l 1215 868 l 1215 694 l 174 694 z "
+    	},
+    	"«": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 694 1215 l 694 1042 l 868 1042 l 868 1215 l 1215 1215 l 1215 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 1215 521 l 1215 347 l 868 347 l 868 521 l 694 521 l 694 347 l 347 347 m 521 521 l 694 521 l 694 694 l 521 694 l 521 868 l 694 868 l 694 1042 l 521 1042 l 521 868 l 347 868 l 347 694 l 521 694 l 521 521 z "
+    	},
+    	"»": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 347 l 0 521 l 174 521 l 174 694 l 347 694 l 347 868 l 174 868 l 174 1042 l 0 1042 l 0 1215 l 347 1215 l 347 1042 l 521 1042 l 521 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 347 l 521 347 l 521 521 l 347 521 l 347 347 l 0 347 m 521 521 l 694 521 l 694 694 l 868 694 l 868 868 l 694 868 l 694 1042 l 521 1042 l 521 868 l 694 868 l 694 694 l 521 694 l 521 521 z "
+    	},
+    	"‹": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 694 347 l 694 521 l 521 521 l 521 694 l 347 694 l 347 868 l 521 868 l 521 1042 l 694 1042 l 694 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 694 868 l 694 694 l 868 694 l 868 521 l 1042 521 l 1042 347 l 694 347 z "
+    	},
+    	"›": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 868,
+    		o: "m 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 521 1215 l 521 1042 l 694 1042 l 694 868 l 868 868 l 868 694 l 694 694 l 694 521 l 521 521 l 521 347 l 174 347 z "
+    	},
+    	"„": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1042,
+    		o: "m 521 694 l 521 347 l 347 347 l 347 174 l 0 174 l 0 347 l 174 347 l 174 694 l 521 694 m 1042 694 l 1042 347 l 868 347 l 868 174 l 521 174 l 521 347 l 694 347 l 694 694 l 1042 694 z "
+    	},
+    	"“": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 1389 l 694 1215 l 521 1215 l 521 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 694 1389 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 868 l 694 868 l 694 1215 l 868 1215 l 868 1389 l 1215 1389 z "
+    	},
+    	"”": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 1389 l 694 1042 l 521 1042 l 521 868 l 174 868 l 174 1042 l 347 1042 l 347 1389 l 694 1389 m 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 694 868 l 694 1042 l 868 1042 l 868 1389 l 1215 1389 z "
+    	},
+    	"‘": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 347 868 l 347 1215 l 521 1215 l 521 1389 l 868 1389 l 868 1215 l 694 1215 l 694 868 l 347 868 z "
+    	},
+    	"’": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 347 868 l 347 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 694 1042 l 694 868 l 347 868 z "
+    	},
+    	"‚": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 347 174 l 347 347 l 521 347 l 521 694 l 868 694 l 868 347 l 694 347 l 694 174 l 347 174 z "
+    	},
+    	"·": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 694,
+    		o: "m 347 521 l 347 868 l 694 868 l 694 521 l 347 521 z "
+    	},
+    	";": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 694,
+    		o: "m 347 868 l 347 1215 l 694 1215 l 694 868 l 347 868 m 174 174 l 174 347 l 347 347 l 347 694 l 694 694 l 694 347 l 521 347 l 521 174 l 174 174 z "
+    	},
+    	" ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 0,
+    		o: ""
+    	},
+    	"": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 174 l 174 521 l 521 521 l 521 174 l 174 174 m 694 174 l 694 521 l 1042 521 l 1042 174 l 694 174 z "
+    	},
+    	"¢": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 868 868 l 868 1042 l 694 1042 l 694 521 l 868 521 l 868 694 l 1215 694 l 1215 521 l 1042 521 l 1042 347 l 694 347 l 694 174 l 521 174 m 347 521 l 521 521 l 521 1042 l 347 1042 l 347 521 z "
+    	},
+    	"¤": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 347 1215 l 347 1042 l 174 1042 l 174 1215 l 347 1215 m 868 1042 l 521 1042 l 521 1215 l 868 1215 l 868 1042 m 1215 1215 l 1215 1042 l 1042 1042 l 1042 1215 l 1215 1215 m 521 1042 l 521 521 l 347 521 l 347 1042 l 521 1042 m 868 1042 l 1042 1042 l 1042 521 l 868 521 l 868 1042 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 521 521 l 868 521 l 868 347 l 521 347 l 521 521 m 1042 347 l 1042 521 l 1215 521 l 1215 347 l 1042 347 z "
+    	},
+    	$: {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 0 347 l 0 521 l 521 521 l 521 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 174 1042 l 174 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 868 l 1042 868 l 1042 694 l 1215 694 l 1215 521 l 1042 521 l 1042 347 l 694 347 l 694 174 l 521 174 m 347 868 l 521 868 l 521 1042 l 347 1042 l 347 868 m 694 521 l 868 521 l 868 694 l 694 694 l 694 521 z "
+    	},
+    	"₯": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 m 174 347 l 521 347 l 521 174 l 0 174 l 0 1215 l 174 1215 l 174 347 m 868 347 l 1042 347 l 1042 174 l 868 174 l 868 0 l 694 0 l 694 347 l 521 347 l 521 1215 l 694 1215 l 694 868 l 868 868 l 868 347 m 1042 868 l 868 868 l 868 1042 l 1042 1042 l 1042 868 m 1215 868 l 1215 347 l 1042 347 l 1042 868 l 1215 868 z "
+    	},
+    	"€": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 694 1215 l 694 1042 l 868 1042 l 868 868 l 521 868 l 521 694 l 868 694 l 868 521 l 694 521 l 694 347 l 868 347 l 868 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 521 174 l 521 347 l 347 347 l 347 521 l 0 521 l 0 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 1042 1389 l 1042 1215 l 1215 1215 z "
+    	},
+    	"ƒ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 347 l 694 347 l 694 174 l 174 174 z "
+    	},
+    	"₴": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1042 1042 l 1215 1042 l 1215 868 l 0 868 l 0 1042 l 694 1042 l 694 1215 l 174 1215 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 m 1215 694 l 1215 521 l 521 521 l 521 347 l 1042 347 l 1042 174 l 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 1215 694 z "
+    	},
+    	"₽": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1389 1215 l 1389 868 l 1215 868 l 1215 694 l 521 694 l 521 521 l 868 521 l 868 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1389 l 1215 1389 l 1215 1215 l 1389 1215 m 1042 1215 l 521 1215 l 521 868 l 1042 868 l 1042 1215 z "
+    	},
+    	"£": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 868 l 1042 868 l 1042 694 l 521 694 l 521 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"₸": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1215 l 174 1389 l 1215 1389 l 1215 1215 l 174 1215 m 521 174 l 521 868 l 174 868 l 174 1042 l 1215 1042 l 1215 868 l 868 868 l 868 174 l 521 174 z "
+    	},
+    	"₮": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 868 521 l 868 174 l 521 174 l 521 347 l 347 347 l 347 521 l 521 521 l 521 694 l 347 694 l 347 868 l 521 868 l 521 1215 l 174 1215 l 174 1389 l 1215 1389 z "
+    	},
+    	"¥": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 174 347 l 174 521 l 521 521 l 521 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 174 1042 l 174 1389 l 521 1389 l 521 1042 l 868 1042 l 868 1389 l 1215 1389 l 1215 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 521 l 1215 521 l 1215 347 l 868 347 l 868 174 l 521 174 z "
+    	},
+    	"∕": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"+": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 347 l 521 694 l 174 694 l 174 868 l 521 868 l 521 1215 l 868 1215 l 868 868 l 1215 868 l 1215 694 l 868 694 l 868 347 l 521 347 z "
+    	},
+    	"×": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 1215 l 347 1042 l 174 1042 l 174 1215 l 347 1215 m 1042 1215 l 1042 1042 l 868 1042 l 868 1215 l 1042 1215 m 521 1042 l 521 868 l 347 868 l 347 1042 l 521 1042 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 694 521 l 694 694 l 868 694 l 868 521 l 694 521 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 868 347 l 868 521 l 1042 521 l 1042 347 l 868 347 z "
+    	},
+    	"÷": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 1042 l 521 1215 l 868 1215 l 868 1042 l 521 1042 m 174 694 l 174 868 l 1215 868 l 1215 694 l 174 694 m 521 347 l 521 521 l 868 521 l 868 347 l 521 347 z "
+    	},
+    	"=": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 868 l 0 1042 l 1215 1042 l 1215 868 l 0 868 m 0 521 l 0 694 l 1215 694 l 1215 521 l 0 521 z "
+    	},
+    	"≠": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 694 868 l 694 694 l 1215 694 l 1215 521 l 347 521 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 521 694 l 521 868 l 0 868 l 0 1042 l 868 1042 l 868 1215 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	">": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 174 l 174 347 l 347 347 l 347 521 l 521 521 l 521 694 l 694 694 l 694 868 l 521 868 l 521 1042 l 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1042 l 868 1042 l 868 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 694 521 l 694 347 l 521 347 l 521 174 l 174 174 z "
+    	},
+    	"<": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 694 174 l 694 347 l 521 347 l 521 521 l 347 521 l 347 694 l 174 694 l 174 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 694 1042 l 694 868 l 521 868 l 521 694 l 694 694 l 694 521 l 868 521 l 868 347 l 1042 347 l 1042 174 l 694 174 z "
+    	},
+    	"≥": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 347 521 l 347 694 l 521 694 l 521 868 l 694 868 l 694 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 868 868 l 868 694 l 694 694 l 694 521 l 347 521 m 347 174 l 347 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"≤": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 1042,
+    		o: "m 694 521 l 694 694 l 521 694 l 521 868 l 347 868 l 347 1042 l 521 1042 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 694 1042 l 694 868 l 868 868 l 868 694 l 1042 694 l 1042 521 l 694 521 m 347 174 l 347 347 l 1042 347 l 1042 174 l 347 174 z "
+    	},
+    	"±": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 521 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 521 l 521 521 m 174 174 l 174 347 l 1215 347 l 1215 174 l 174 174 z "
+    	},
+    	"≈": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1042,
+    		o: "m 521 1215 l 521 1042 l 174 1042 l 174 1215 l 521 1215 m 1042 1215 l 1042 1042 l 868 1042 l 868 1215 l 1042 1215 m 0 1042 l 174 1042 l 174 868 l 0 868 l 0 1042 m 521 1042 l 868 1042 l 868 868 l 521 868 l 521 1042 m 521 694 l 521 521 l 174 521 l 174 694 l 521 694 m 868 694 l 1042 694 l 1042 521 l 868 521 l 868 694 m 0 521 l 174 521 l 174 347 l 0 347 l 0 521 m 521 521 l 868 521 l 868 347 l 521 347 l 521 521 z "
+    	},
+    	"~": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 694 l 1042 694 l 1042 521 l 521 521 l 521 694 l 347 694 l 347 868 l 174 868 l 174 1042 l 694 1042 l 694 868 l 868 868 l 868 694 m 0 868 l 174 868 l 174 694 l 0 694 l 0 868 m 1215 868 l 1215 694 l 1042 694 l 1042 868 l 1215 868 z "
+    	},
+    	"¬": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 521 l 868 868 l 174 868 l 174 1042 l 1215 1042 l 1215 521 l 868 521 z "
+    	},
+    	"∞": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 868 l 174 868 l 174 1042 l 521 1042 l 521 868 m 1042 868 l 694 868 l 694 1042 l 1042 1042 l 1042 868 m 174 868 l 174 521 l 0 521 l 0 868 l 174 868 m 694 868 l 694 521 l 521 521 l 521 868 l 694 868 m 1215 868 l 1215 521 l 1042 521 l 1042 868 l 1215 868 m 174 521 l 521 521 l 521 347 l 174 347 l 174 521 m 694 521 l 1042 521 l 1042 347 l 694 347 l 694 521 z "
+    	},
+    	"∫": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1042 1389 l 1042 1215 l 868 1215 l 868 174 l 694 174 l 694 0 l 347 0 l 347 174 l 521 174 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 m 1215 1215 l 1215 1042 l 1042 1042 l 1042 1215 l 1215 1215 m 347 347 l 347 174 l 174 174 l 174 347 l 347 347 z "
+    	},
+    	"∆": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 174 l 0 174 m 347 347 l 868 347 l 868 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 347 z "
+    	},
+    	"∏": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 1215 1389 l 1215 174 l 868 174 l 868 1215 l 347 1215 l 347 174 l 0 174 z "
+    	},
+    	"∑": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 521 l 347 521 l 347 694 l 521 694 l 521 868 l 347 868 l 347 1042 l 174 1042 l 174 1215 l 0 1215 l 0 1389 l 1215 1389 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 694 1042 l 694 868 l 1042 868 l 1042 694 l 694 694 l 694 521 l 521 521 l 521 347 l 868 347 l 868 521 l 1215 521 l 1215 174 l 0 174 z "
+    	},
+    	"√": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 347 694 l 347 521 l 521 521 l 521 1389 l 1215 1389 l 1215 1215 l 868 1215 l 868 174 l 347 174 z "
+    	},
+    	"µ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 347 l 694 347 l 694 174 l 347 174 l 347 0 l 0 0 l 0 1042 l 347 1042 l 347 347 m 1215 347 l 1215 174 l 868 174 l 868 347 l 694 347 l 694 1042 l 1042 1042 l 1042 347 l 1215 347 z "
+    	},
+    	"∂": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 0 347 l 0 694 l 174 694 l 174 868 l 868 868 l 868 1042 l 694 1042 l 694 1215 l 347 1215 l 347 1042 l 0 1042 l 0 1215 l 174 1215 l 174 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 347 l 1042 347 l 1042 174 l 174 174 m 347 347 l 868 347 l 868 694 l 347 694 l 347 347 z "
+    	},
+    	"%": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1042 l 347 1042 l 347 1215 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 347 868 l 0 868 l 0 1215 l 174 1215 l 174 1042 l 347 1042 l 347 868 m 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 1215 m 694 1042 l 868 1042 l 868 868 l 694 868 l 694 1042 m 521 868 l 694 868 l 694 694 l 521 694 l 521 868 m 347 694 l 521 694 l 521 521 l 347 521 l 347 694 m 868 694 l 1215 694 l 1215 347 l 1042 347 l 1042 521 l 868 521 l 868 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 868 347 l 1042 347 l 1042 174 l 694 174 l 694 521 l 868 521 l 868 347 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"‰": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1042 l 347 1042 l 347 1215 m 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 l 1215 1215 m 347 868 l 0 868 l 0 1215 l 174 1215 l 174 1042 l 347 1042 l 347 868 m 1042 1042 l 868 1042 l 868 1215 l 1042 1215 l 1042 1042 m 868 868 l 694 868 l 694 1042 l 868 1042 l 868 868 m 694 694 l 521 694 l 521 868 l 694 868 l 694 694 m 521 694 l 521 521 l 347 521 l 347 694 l 521 694 m 1389 694 l 1389 347 l 1215 347 l 1215 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 521 174 l 521 521 l 694 521 l 694 347 l 868 347 l 868 521 l 694 521 l 694 694 l 1389 694 m 174 521 l 347 521 l 347 347 l 174 347 l 174 521 m 0 347 l 174 347 l 174 174 l 0 174 l 0 347 z "
+    	},
+    	"↑": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 0 l 347 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 868 694 l 868 0 l 347 0 z "
+    	},
+    	"→": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 694 174 l 694 521 l 0 521 l 0 1042 l 694 1042 l 694 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 1215 1042 l 1215 868 l 1389 868 l 1389 694 l 1215 694 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 694 174 z "
+    	},
+    	"↓": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 0 l 521 174 l 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 694 l 347 694 l 347 1389 l 868 1389 l 868 694 l 1215 694 l 1215 521 l 1042 521 l 1042 347 l 868 347 l 868 174 l 694 174 l 694 0 l 521 0 z "
+    	},
+    	"←": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1042 l 1389 1042 l 1389 521 l 694 521 l 694 174 l 521 174 z "
+    	},
+    	"◊": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 m 521 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1042 m 694 1042 l 694 1215 l 868 1215 l 868 1042 l 694 1042 m 347 868 l 174 868 l 174 1042 l 347 1042 l 347 868 m 868 868 l 868 1042 l 1042 1042 l 1042 868 l 868 868 m 174 868 l 174 694 l 0 694 l 0 868 l 174 868 m 1215 868 l 1215 694 l 1042 694 l 1042 868 l 1215 868 m 347 694 l 347 521 l 174 521 l 174 694 l 347 694 m 868 694 l 1042 694 l 1042 521 l 868 521 l 868 694 m 521 521 l 521 347 l 347 347 l 347 521 l 521 521 m 694 521 l 868 521 l 868 347 l 694 347 l 694 521 m 521 347 l 694 347 l 694 174 l 521 174 l 521 347 z "
+    	},
+    	"▲": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 347 l 174 347 l 174 694 l 347 694 l 347 1042 l 521 1042 l 521 1389 l 694 1389 l 694 1042 l 868 1042 l 868 694 l 1042 694 l 1042 347 l 1215 347 l 1215 174 l 0 174 z "
+    	},
+    	"▶": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 0 174 l 0 1389 l 174 1389 l 174 1215 l 521 1215 l 521 1042 l 868 1042 l 868 868 l 1215 868 l 1215 694 l 868 694 l 868 521 l 521 521 l 521 347 l 174 347 l 174 174 l 0 174 z "
+    	},
+    	"▼": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 521 l 347 521 l 347 868 l 174 868 l 174 1215 l 0 1215 l 0 1389 l 1215 1389 l 1215 1215 l 1042 1215 l 1042 868 l 868 868 l 868 521 l 694 521 l 694 174 l 521 174 z "
+    	},
+    	"◀": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1042 174 l 1042 347 l 694 347 l 694 521 l 347 521 l 347 694 l 0 694 l 0 868 l 347 868 l 347 1042 l 694 1042 l 694 1215 l 1042 1215 l 1042 1389 l 1215 1389 l 1215 174 l 1042 174 z "
+    	},
+    	"★": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 521 l 347 521 l 347 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 521 1042 l 521 1389 l 694 1389 l 694 1042 l 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 174 l 868 174 l 868 347 l 694 347 l 694 521 l 521 521 l 521 347 l 347 347 l 347 174 l 174 174 z "
+    	},
+    	"☆": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 694 1042 l 521 1042 l 521 1389 l 694 1389 l 694 1042 m 347 868 l 347 694 l 174 694 l 174 868 l 0 868 l 0 1042 l 521 1042 l 521 868 l 347 868 m 1215 1042 l 1215 868 l 1042 868 l 1042 694 l 868 694 l 868 868 l 694 868 l 694 1042 l 1215 1042 m 694 694 l 868 694 l 868 521 l 1042 521 l 1042 174 l 868 174 l 868 347 l 347 347 l 347 174 l 174 174 l 174 521 l 347 521 l 347 694 l 521 694 l 521 521 l 694 521 l 694 694 z "
+    	},
+    	"♠": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 347 l 347 347 l 347 521 l 0 521 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 521 l 868 521 l 868 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"♣": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 868 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 m 521 1042 l 521 694 l 174 694 l 174 1042 l 521 1042 m 1215 1042 l 1215 694 l 868 694 l 868 1042 l 1215 1042 m 521 694 l 868 694 l 868 347 l 1042 347 l 1042 174 l 347 174 l 347 347 l 521 347 l 521 694 z "
+    	},
+    	"♥": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 1215 1215 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 347 l 694 347 l 694 174 l 521 174 z "
+    	},
+    	"♦": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 347 l 347 347 l 347 521 l 174 521 l 174 694 l 0 694 l 0 868 l 174 868 l 174 1042 l 347 1042 l 347 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 l 868 1215 l 868 1042 l 1042 1042 l 1042 868 l 1215 868 l 1215 694 l 1042 694 l 1042 521 l 868 521 l 868 347 l 694 347 l 694 174 l 521 174 z "
+    	},
+    	"♪": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 1215 l 868 1042 l 694 1042 l 694 347 l 521 347 l 521 174 l 174 174 l 174 347 l 0 347 l 0 521 l 174 521 l 174 694 l 521 694 l 521 1389 l 694 1389 l 694 1215 l 868 1215 m 1042 1042 l 1042 868 l 868 868 l 868 1042 l 1042 1042 m 1215 868 l 1215 694 l 1042 694 l 1042 868 l 1215 868 m 868 694 l 1042 694 l 1042 521 l 868 521 l 868 694 z "
+    	},
+    	"": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 868 1215 l 694 1215 l 694 1389 l 868 1389 l 868 1215 m 1389 1042 l 1389 521 l 1215 521 l 1215 347 l 1042 347 l 1042 174 l 694 174 l 694 347 l 521 347 l 521 174 l 347 174 l 347 347 l 174 347 l 174 521 l 0 521 l 0 1042 l 174 1042 l 174 1215 l 694 1215 l 694 1042 l 868 1042 l 868 1215 l 1215 1215 l 1215 1042 l 1042 1042 l 1042 694 l 868 694 l 868 521 l 1042 521 l 1042 694 l 1215 694 l 1215 1042 l 1389 1042 z "
+    	},
+    	"@": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 1042 1389 l 1042 1215 l 174 1215 l 174 1389 l 1042 1389 m 0 1215 l 174 1215 l 174 347 l 0 347 l 0 1215 m 1215 1215 l 1215 521 l 347 521 l 347 1042 l 868 1042 l 868 694 l 1042 694 l 1042 1215 l 1215 1215 m 694 868 l 521 868 l 521 694 l 694 694 l 694 868 m 174 174 l 174 347 l 1042 347 l 1042 174 l 174 174 z "
+    	},
+    	"&": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 868 521 l 1042 521 l 1042 347 l 1215 347 l 1215 174 l 174 174 l 174 347 l 0 347 l 0 694 l 174 694 l 174 868 l 0 868 l 0 1215 l 174 1215 l 174 1389 l 694 1389 l 694 1215 l 868 1215 l 868 868 l 694 868 l 694 694 l 868 694 l 868 521 m 347 868 l 521 868 l 521 1215 l 347 1215 l 347 868 m 694 521 l 521 521 l 521 694 l 347 694 l 347 347 l 694 347 l 694 521 m 1215 694 l 1215 521 l 1042 521 l 1042 694 l 1215 694 z "
+    	},
+    	"¶": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 694 174 l 694 521 l 347 521 l 347 694 l 174 694 l 174 1215 l 347 1215 l 347 1389 l 1215 1389 l 1215 174 l 1042 174 l 1042 521 l 868 521 l 868 174 l 694 174 m 521 694 l 694 694 l 694 1215 l 521 1215 l 521 1042 l 347 1042 l 347 868 l 521 868 l 521 694 m 868 694 l 1042 694 l 1042 1215 l 868 1215 l 868 694 z "
+    	},
+    	"§": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 1215 1215 l 1215 1042 l 868 1042 l 868 1215 l 521 1215 l 521 1042 l 868 1042 l 868 868 l 521 868 l 521 694 l 347 694 l 347 868 l 174 868 l 174 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 l 1215 1215 m 868 694 l 868 868 l 1042 868 l 1042 694 l 1215 694 l 1215 347 l 1042 347 l 1042 174 l 347 174 l 347 347 l 174 347 l 174 521 l 521 521 l 521 347 l 868 347 l 868 521 l 521 521 l 521 694 l 868 694 z "
+    	},
+    	"©": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1042 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 m 347 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1042 m 1042 1042 l 1042 1215 l 1215 1215 l 1215 1042 l 1042 1042 m 174 1042 l 174 347 l 0 347 l 0 1042 l 174 1042 m 521 1042 l 868 1042 l 868 868 l 521 868 l 521 1042 m 1389 1042 l 1389 347 l 1215 347 l 1215 1042 l 1389 1042 m 347 868 l 521 868 l 521 521 l 347 521 l 347 868 m 521 347 l 521 521 l 868 521 l 868 347 l 521 347 m 347 347 l 347 174 l 174 174 l 174 347 l 347 347 m 1042 347 l 1215 347 l 1215 174 l 1042 174 l 1042 347 m 347 174 l 1042 174 l 1042 0 l 347 0 l 347 174 z "
+    	},
+    	"®": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1389,
+    		o: "m 1042 1215 l 347 1215 l 347 1389 l 1042 1389 l 1042 1215 m 347 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1042 m 1042 1042 l 1042 1215 l 1215 1215 l 1215 1042 l 1042 1042 m 174 1042 l 174 347 l 0 347 l 0 1042 l 174 1042 m 347 347 l 347 1042 l 868 1042 l 868 868 l 521 868 l 521 694 l 868 694 l 868 521 l 521 521 l 521 347 l 347 347 m 1389 1042 l 1389 347 l 1215 347 l 1215 1042 l 1389 1042 m 868 694 l 868 868 l 1042 868 l 1042 694 l 868 694 m 868 347 l 868 521 l 1042 521 l 1042 347 l 868 347 m 347 347 l 347 174 l 174 174 l 174 347 l 347 347 m 1042 347 l 1215 347 l 1215 174 l 1042 174 l 1042 347 m 347 174 l 1042 174 l 1042 0 l 347 0 l 347 174 z "
+    	},
+    	"™": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 347 694 l 347 1215 l 174 1215 l 174 1389 l 1215 1389 l 1215 694 l 1042 694 l 1042 1042 l 868 1042 l 868 694 l 694 694 l 694 1215 l 521 1215 l 521 694 l 347 694 z "
+    	},
+    	"°": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 694 1215 l 521 1215 l 521 1389 l 694 1389 l 694 1215 m 521 1215 l 521 1042 l 347 1042 l 347 1215 l 521 1215 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 m 521 1042 l 694 1042 l 694 868 l 521 868 l 521 1042 z "
+    	},
+    	"|": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 521 174 l 521 1389 l 868 1389 l 868 174 l 521 174 z "
+    	},
+    	"¦": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 521 868 l 521 1389 l 868 1389 l 868 868 l 521 868 m 521 174 l 521 694 l 868 694 l 868 174 l 521 174 z "
+    	},
+    	"†": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 174 l 521 174 z "
+    	},
+    	"‡": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 521 174 l 521 521 l 174 521 l 174 694 l 521 694 l 521 868 l 174 868 l 174 1042 l 521 1042 l 521 1389 l 868 1389 l 868 1042 l 1215 1042 l 1215 868 l 868 868 l 868 694 l 1215 694 l 1215 521 l 868 521 l 868 174 l 521 174 z "
+    	},
+    	"№": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 1215,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 174 l 0 174 l 0 1389 l 347 1389 m 1042 1215 l 868 1215 l 868 1389 l 1042 1389 l 1042 1215 m 347 1215 l 521 1215 l 521 174 l 347 174 l 347 1215 m 868 1215 l 868 694 l 694 694 l 694 1215 l 868 1215 m 1215 1215 l 1215 694 l 1042 694 l 1042 1215 l 1215 1215 m 868 694 l 1042 694 l 1042 521 l 868 521 l 868 694 m 694 347 l 1215 347 l 1215 174 l 694 174 l 694 347 z "
+    	},
+    	"^": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 174 1042 z "
+    	},
+    	"˗": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 694 l 174 868 l 1042 868 l 1042 694 l 174 694 z "
+    	},
+    	"̀": {
+    		ha: 0,
+    		x_min: -986,
+    		x_max: -639,
+    		o: "m -812 1389 l -812 1215 l -986 1215 l -986 1389 l -812 1389 m -639 1215 l -639 1042 l -812 1042 l -812 1215 l -639 1215 z "
+    	},
+    	"́": {
+    		ha: 0,
+    		x_min: -847,
+    		x_max: -500,
+    		o: "m -500 1389 l -500 1215 l -674 1215 l -674 1389 l -500 1389 m -847 1215 l -674 1215 l -674 1042 l -847 1042 l -847 1215 z "
+    	},
+    	"̦": {
+    		ha: 0,
+    		x_min: -1042,
+    		x_max: -521,
+    		o: "m -1042 -519 l -1042 -346 l -868 -346 l -868 1 l -521 1 l -521 -346 l -694 -346 l -694 -519 l -1042 -519 z "
+    	},
+    	"̵": {
+    		ha: 0,
+    		x_min: -1028,
+    		x_max: -356,
+    		o: "m -1028 499 l -1028 672 l -356 672 l -356 499 l -1028 499 z "
+    	},
+    	"ʼ": {
+    		ha: 1389,
+    		x_min: 0,
+    		x_max: 347,
+    		o: "m 0 868 l 0 1389 l 347 1389 l 347 1042 l 174 1042 l 174 868 l 0 868 z "
+    	},
+    	"ˉ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 z "
+    	},
+    	"ˋ": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 694 1389 l 694 1215 l 521 1215 l 521 1389 l 694 1389 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 z "
+    	},
+    	"ˊ": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 868 1389 l 868 1215 l 694 1215 l 694 1389 l 868 1389 m 521 1215 l 694 1215 l 694 1042 l 521 1042 l 521 1215 z "
+    	},
+    	"´": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 868 1389 l 868 1215 l 694 1215 l 694 1389 l 868 1389 m 521 1215 l 694 1215 l 694 1042 l 521 1042 l 521 1215 z "
+    	},
+    	"˘": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 1389 l 347 1215 l 174 1215 l 174 1389 l 347 1389 m 1042 1389 l 1042 1215 l 868 1215 l 868 1389 l 1042 1389 m 347 1215 l 868 1215 l 868 1042 l 347 1042 l 347 1215 z "
+    	},
+    	"ˇ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 1042 l 347 1215 l 174 1215 l 174 1389 l 521 1389 l 521 1215 l 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 868 1215 l 868 1042 l 347 1042 z "
+    	},
+    	"¸": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 868 347 l 868 174 l 694 174 l 694 347 l 868 347 m 347 174 l 694 174 l 694 0 l 347 0 l 347 174 z "
+    	},
+    	"ˆ": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 l 174 1042 z "
+    	},
+    	"¨": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 1215 l 174 1389 l 521 1389 l 521 1215 l 174 1215 m 694 1215 l 694 1389 l 1042 1389 l 1042 1215 l 694 1215 z "
+    	},
+    	"˙": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 521 1215 l 521 1389 l 868 1389 l 868 1215 l 521 1215 z "
+    	},
+    	"`": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 694 1389 l 694 1215 l 521 1215 l 521 1389 l 694 1389 m 868 1215 l 868 1042 l 694 1042 l 694 1215 l 868 1215 z "
+    	},
+    	"˝": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 1389 l 521 1389 l 521 1215 l 347 1215 l 347 1389 m 1042 1389 l 1042 1215 l 868 1215 l 868 1389 l 1042 1389 m 174 1215 l 347 1215 l 347 1042 l 174 1042 l 174 1215 m 694 1215 l 868 1215 l 868 1042 l 694 1042 l 694 1215 z "
+    	},
+    	"¯": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 1215 l 174 1389 l 1042 1389 l 1042 1215 l 174 1215 z "
+    	},
+    	"˛": {
+    		ha: 1389,
+    		x_min: 347,
+    		x_max: 868,
+    		o: "m 694 347 l 521 347 l 521 521 l 694 521 l 694 347 m 521 347 l 521 174 l 347 174 l 347 347 l 521 347 m 868 174 l 868 0 l 521 0 l 521 174 l 868 174 z "
+    	},
+    	"˚": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 347 868 l 347 1042 l 174 1042 l 174 1215 l 347 1215 l 347 1389 l 868 1389 l 868 1215 l 1042 1215 l 1042 1042 l 868 1042 l 868 868 l 347 868 m 521 1042 l 694 1042 l 694 1215 l 521 1215 l 521 1042 z "
+    	},
+    	"˜": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 694 1215 l 868 1215 l 868 1042 l 521 1042 l 521 1215 l 347 1215 l 347 1389 l 694 1389 l 694 1215 m 1042 1389 l 1042 1215 l 868 1215 l 868 1389 l 1042 1389 m 174 1215 l 347 1215 l 347 1042 l 174 1042 l 174 1215 z "
+    	},
+    	"΄": {
+    		ha: 1389,
+    		x_min: 521,
+    		x_max: 868,
+    		o: "m 868 1389 l 868 1215 l 694 1215 l 694 1389 l 868 1389 m 521 1215 l 694 1215 l 694 1042 l 521 1042 l 521 1215 z "
+    	},
+    	"΅": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 1389 l 347 1389 l 347 1215 l 174 1215 l 174 1389 m 694 1389 l 868 1389 l 868 1215 l 694 1215 l 694 1389 m 1215 1389 l 1215 1215 l 1042 1215 l 1042 1389 l 1215 1389 m 521 1215 l 694 1215 l 694 1042 l 521 1042 l 521 1215 z "
+    	},
+    	"": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1215,
+    		o: "m 174 174 l 174 1389 l 1215 1389 l 1215 174 l 174 174 m 521 694 l 1042 694 l 1042 1215 l 347 1215 l 347 1042 l 868 1042 l 868 868 l 521 868 l 521 694 m 521 347 l 694 347 l 694 521 l 521 521 l 521 347 z "
+    	},
+    	"": {
+    		ha: 1389,
+    		x_min: 174,
+    		x_max: 1042,
+    		o: "m 174 174 l 174 347 l 521 347 l 521 521 l 1042 521 l 1042 174 l 174 174 z "
+    	}
+    };
+    var familyName = "Press Start 2P";
+    var ascender = 1389;
+    var descender = 0;
+    var underlinePosition = -104;
+    var underlineThickness = 69;
+    var boundingBox = {
+    	yMin: -519,
+    	xMin: -1125,
+    	yMax: 1389,
+    	xMax: 1389
+    };
+    var resolution = 1000;
+    var original_font_information = {
+    	format: 0,
+    	copyright: "Copyright 2012 The Press Start 2P Project Authors (cody@zone38.net), with Reserved Font Name \"Press Start 2P\"",
+    	fontFamily: "Press Start 2P",
+    	fontSubfamily: "Regular",
+    	uniqueID: "3.000;CYRE;PressStart2P-Regular",
+    	fullName: "Press Start 2P Regular",
+    	version: "Version 3.000",
+    	postScriptName: "PressStart2P-Regular",
+    	manufacturer: "CodeMan38",
+    	designer: "CodeMan38",
+    	manufacturerURL: "http://www.zone38.net/",
+    	designerURL: "http://www.zone38.net/",
+    	licence: "This Font Software is licensed under the SIL Open Font License, Version 1.1. This license is available with a FAQ at: http://scripts.sil.org/OFL",
+    	licenceURL: "http://scripts.sil.org/OFL"
+    };
+    var cssFontWeight = "normal";
+    var cssFontStyle = "normal";
+    var JsonFont = {
+    	glyphs: glyphs,
+    	familyName: familyName,
+    	ascender: ascender,
+    	descender: descender,
+    	underlinePosition: underlinePosition,
+    	underlineThickness: underlineThickness,
+    	boundingBox: boundingBox,
+    	resolution: resolution,
+    	original_font_information: original_font_information,
+    	cssFontWeight: cssFontWeight,
+    	cssFontStyle: cssFontStyle
+    };
+
+    class Pacman {
+        //public deletedFlag: number = 0
+        constructor(id, name, peerId, position) {
+            this.id = id;
+            this.name = name;
+            this.isPlaying = false;
+            this.isOnline = true;
+            this.peerId = peerId;
+            // Create spheres with decreasingly small horizontal sweeps, in order
+            // to create pacman "death" animation.
+            let pacmanGeometries = new Array();
+            let numFrames = 40;
+            for (let i = 0; i < numFrames; i++) {
+                let offset = (i / (numFrames - 1)) * Math.PI;
+                pacmanGeometries.push(new SphereGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2));
+                pacmanGeometries[i].rotateX(Math.PI / 2);
+            }
+            let pacmanMaterial = Pacman.PACMAN_ONLINE_MATERIAL;
+            this.mesh = new Mesh(pacmanGeometries[0], pacmanMaterial);
+            this.frames = pacmanGeometries;
+            this.distanceMoved = 0;
+            this.lastDistanceMoved = 0;
+            // Initialize pacman facing to the left.
+            this.mesh.position.copy(position);
+            this.direction = new Vector3(-1, 0, 0);
+            this.frameCounter = 0;
+            this.isMoving = false;
+        }
+        // Update pacman mesh simulating the eat movement
+        updateFrame(currentPacman) {
+            // Show eating animation based on how much pacman has moved.
+            let maxAngle = Math.PI / 4;
+            let angle = (this.distanceMoved * 2) % (maxAngle * 2);
+            if (angle > maxAngle)
+                angle = maxAngle * 2 - angle;
+            let frame = Math.floor(angle / Math.PI * this.frames.length);
+            this.mesh.geometry = this.frames[frame];
+            // Update rotation based on direction so that mouth is always facing forward.
+            // The "mouth" part is on the side of the sphere, make it "look" up but
+            // set the up direction so that it points forward.
+            this.mesh.up.copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2);
+            this.mesh.lookAt((new Vector3()).copy(this.mesh.position).add(Utils.UP));
+            if (!this.isOnline) {
+                this.mesh.material = Pacman.PACMAN_OFFLINE_MATERIAL;
+                if (this.textMesh) {
+                    this.textMesh.material = Pacman.PACMAN_OFFLINE_MATERIAL;
+                }
+            }
+            // Update text mesh
+            if (this.textMesh) {
+                // Position text just above pacman.
+                this.textMesh.position.copy(this.mesh.position).add(Utils.UP);
+                // Rotate text so that it faces same direction as pacman.
+                this.textMesh.up.copy(currentPacman.direction);
+                this.textMesh.lookAt(this.textMesh.position.clone().add(Utils.UP));
+                this.textMesh.rotateX(Math.PI / 2);
+            }
+        }
+        // Elaborate key pressed and change pacman position
+        movePacman(delta, keys, levelMap, state) {
+            this.isMoving = false;
+            // Move based on current keys being pressed.
+            if (keys.getKeyState('KeyW') || keys.getKeyState('ArrowUp')) {
+                // W - move forward
+                //pacman.translateOnAxis(pacman.direction, PACMAN_SPEED * delta)
+                // Because we are rotating the object above using lookAt, "forward" is to the left.
+                this.mesh.translateOnAxis(Utils.LEFT, Pacman.PACMAN_SPEED * delta);
+                this.distanceMoved += Pacman.PACMAN_SPEED * delta;
+                this.isMoving = true;
+            }
+            if (keys.getKeyState('KeyA') || keys.getKeyState('ArrowLeft')) {
+                // A - rotate left
+                this.direction.applyAxisAngle(Utils.UP, Math.PI / 2 * delta);
+            }
+            if (keys.getKeyState('KeyD') || keys.getKeyState('ArrowRight')) {
+                // D - rotate right
+                this.direction.applyAxisAngle(Utils.UP, -Math.PI / 2 * delta);
+            }
+            if (keys.getKeyState('KeyS') || keys.getKeyState('ArrowDown')) {
+                // S - move backward
+                this.mesh.translateOnAxis(Utils.LEFT, -Pacman.PACMAN_SPEED * delta);
+                this.distanceMoved += Pacman.PACMAN_SPEED * delta;
+                this.isMoving = true;
+            }
+            // Check for collision with walls
+            let leftSide = this.mesh.position.clone().addScaledVector(Utils.LEFT, Pacman.PACMAN_RADIUS).round();
+            let topSide = this.mesh.position.clone().addScaledVector(Utils.TOP, Pacman.PACMAN_RADIUS).round();
+            let rightSide = this.mesh.position.clone().addScaledVector(Utils.RIGHT, Pacman.PACMAN_RADIUS).round();
+            let bottomSide = this.mesh.position.clone().addScaledVector(Utils.BOTTOM, Pacman.PACMAN_RADIUS).round();
+            if (levelMap.isWall(leftSide)) {
+                this.mesh.position.x = leftSide.x + 0.5 + Pacman.PACMAN_RADIUS;
+            }
+            if (levelMap.isWall(rightSide)) {
+                this.mesh.position.x = rightSide.x - 0.5 - Pacman.PACMAN_RADIUS;
+            }
+            if (levelMap.isWall(topSide)) {
+                this.mesh.position.y = topSide.y - 0.5 - Pacman.PACMAN_RADIUS;
+            }
+            if (levelMap.isWall(bottomSide)) {
+                this.mesh.position.y = bottomSide.y + 0.5 + Pacman.PACMAN_RADIUS;
+            }
+            // Wrap packman to level map
+            levelMap.wrapObject(this.mesh);
+            // Eat dots
+            let x = Math.round(this.mesh.position.x), y = Math.round(this.mesh.position.y);
+            let dot = state.getDot(x, y);
+            if (dot != null) {
+                dot.pacmanId = this.id;
+                state.updateDotShared(dot);
+            }
+        }
+        // Get pacman position
+        getPosition() {
+            return this.mesh.position;
+        }
+        // Add mesh to 3d scene
+        addToScene(scene) {
+            scene.add(this.mesh);
+            if (this.textMesh)
+                scene.add(this.textMesh);
+        }
+        makeTextNick() {
+            let textMaterial = new MeshPhongMaterial({ color: 'yellow' });
+            // Show 3D text banner.
+            let loader = new FontLoader();
+            let font = loader.parse(JsonFont);
+            let textGeometry = new TextGeometry(this.name, {
+                font: font,
+                size: 0.18,
+                height: 0.05
+            });
+            this.textMesh = new Mesh(textGeometry, textMaterial);
+            var center = new Vector3();
+            this.textMesh.geometry.computeBoundingBox();
+            this.textMesh.geometry.boundingBox.getCenter(center);
+            this.textMesh.geometry.center();
+        }
+        // Get plain js object
+        toPlainObj() {
+            let obj = {};
+            obj["id"] = this.id;
+            obj["name"] = this.name;
+            obj["peerId"] = this.peerId;
+            obj["position"] = [this.mesh.position.x, this.mesh.position.y, this.mesh.position.z];
+            obj["direction"] = [this.direction.x, this.direction.y, this.direction.z];
+            obj["distanceMoved"] = this.distanceMoved;
+            obj["isMoving"] = this.isMoving;
+            obj["isPlaying"] = this.isPlaying;
+            obj["isOnline"] = this.isOnline;
+            return obj;
+        }
+        // New pacman from plain js object
+        static fromObj(obj) {
+            let position = new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]);
+            let out = new Pacman(obj["id"], obj["name"], obj["peerId"], position);
+            out.copyObj(obj);
+            return out;
+        }
+        // Copy from a js plain object
+        copyObj(obj) {
+            this.mesh.position.copy(new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]));
+            this.direction.copy(new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]));
+            this.distanceMoved = obj["distanceMoved"];
+            this.isMoving = obj["isMoving"];
+            this.isPlaying = obj["isPlaying"];
+            this.isOnline = obj["isOnline"];
+        }
+        // Copy object if it has the same id
+        copyObjIfSameId(obj) {
+            if (obj["id"] == this.id) {
+                this.copyObj(obj);
+                return true;
+            }
+            return false;
+        }
+    }
+    Pacman.PACMAN_SPEED = 2;
+    Pacman.PACMAN_RADIUS = 0.4;
+    Pacman.PACMAN_ONLINE_MATERIAL = new MeshPhongMaterial({ color: 'yellow', side: DoubleSide });
+    Pacman.PACMAN_OFFLINE_MATERIAL = new MeshPhongMaterial({ color: 'gray', side: DoubleSide });
+
+    class Game {
+        createRenderer() {
+            let renderer = new WebGLRenderer({ antialias: true });
+            renderer.setClearColor('black', 1.0);
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+            return renderer;
+        }
+        createScene() {
+            let scene = new Scene();
+            // Add lighting
+            scene.add(new AmbientLight(0x888888));
+            let light = new SpotLight('white', 0.5);
+            light.position.set(0, 0, 50);
+            scene.add(light);
+            return scene;
+        }
+        createHudCamera(map) {
+            let halfWidth = (map.right - map.left) / 2, halfHeight = (map.top - map.bottom) / 2;
+            let hudCamera = new OrthographicCamera(-halfWidth, halfWidth, halfHeight, -halfHeight, 1, 100);
+            hudCamera.position.copy(new Vector3(map.centerX, map.centerY, 10));
+            hudCamera.lookAt(new Vector3(map.centerX, map.centerY, 0));
+            return hudCamera;
+        }
+        renderHud(renderer, hudCamera, scene) {
+            // Increase size of pacman and dots in HUD to make them easier to see.
+            scene.children.forEach(function (object) {
+                if (object.isWall !== true)
+                    object.scale.set(2.5, 2.5, 2.5);
+            });
+            // Only render in the bottom left 200x200 square of the screen.
+            renderer.enableScissorTest(true);
+            renderer.setScissor(10, 10, 200, 200);
+            renderer.setViewport(10, 10, 200, 200);
+            renderer.render(scene, hudCamera);
+            renderer.enableScissorTest(false);
+            // Reset scales after rendering HUD.
+            scene.children.forEach(function (object) {
+                object.scale.set(1, 1, 1);
+            });
+        }
+        // Generic functions
+        // =================
+        distance(object1, object2) {
+            let difference = new Vector3();
+            // Calculate difference between objects' positions.
+            difference.copy(object1.position).sub(object2.position);
+            return difference.length();
+        }
+        gameLoop(callback) {
+            let previousFrameTime = window.performance.now();
+            // How many seconds the animation has progressed in total.
+            let animationSeconds = 0;
+            let render = () => {
+                let now = window.performance.now();
+                let animationDelta = (now - previousFrameTime) / 1000;
+                previousFrameTime = now;
+                // requestAnimationFrame will not call the callback if the browser
+                // isn't visible, so if the browser has lost focus for a while the
+                // time since the last frame might be very large. This could cause
+                // strange behavior (such as objects teleporting through walls in
+                // one frame when they would normally move slowly toward the wall
+                // over several frames), so make sure that the delta is never too
+                // large.
+                animationDelta = Math.min(animationDelta, 1 / 30);
+                // Keep track of how many seconds of animation has passed.
+                animationSeconds += animationDelta;
+                callback(animationDelta, animationSeconds);
+                requestAnimationFrame(render);
+            };
+            requestAnimationFrame(render);
+        }
+        computeAssignablePacmans(pacmansMap) {
+            let assignablePacmans = new Map();
+            for (let p of pacmansMap) {
+                if (p[1].isOnline) {
+                    assignablePacmans.set(p[0], p[1]);
+                }
+            }
+            return assignablePacmans;
+        }
+        computeGhostTarget(state, overwrite = false) {
+            let pacmansMap = state.getPacmansMap();
+            let ghosts = state.getGhosts();
+            let assignablePacmans = this.computeAssignablePacmans(pacmansMap);
+            // Remove from assignable all pacmans that are already assigned and are good
+            for (let ghost of ghosts) {
+                if (overwrite) {
+                    ghost.pacmanTarget = null;
+                }
+                if (ghost.pacmanTarget) {
+                    let pacman = pacmansMap.get(ghost.pacmanTarget);
+                    if (pacman && pacman.isOnline) { // good
+                        assignablePacmans.delete(pacman.id);
+                    }
+                    else {
+                        ghost.pacmanTarget = null;
+                    }
+                }
+            }
+            ghosts = state.getGhosts();
+            for (let ghost of ghosts) {
+                // If there is less pacmans than ghosts assign multiple 
+                if (!ghost.pacmanTarget) {
+                    if (assignablePacmans.size == 0)
+                        assignablePacmans = this.computeAssignablePacmans(pacmansMap);
+                    let assignablePList = Array.from(assignablePacmans.values());
+                    let randomIndex = Math.floor(Math.random() * assignablePList.length);
+                    let randomPacman = assignablePList.at(randomIndex);
+                    assignablePacmans.delete(randomPacman.id);
+                    ghost.pacmanTarget = randomPacman.id;
+                    console.log("New pacman assigned to ghost" + ghost.id + "->" + randomPacman.name);
+                }
+            }
+            state.updateGhostsShared();
+        }
+        controlOfflinePacmans(provider, state) {
+            let connected = provider.room.bcConns;
+            console.log(provider.room.peerId);
+            console.log(connected);
+            for (let p of state.getPacmansList()) {
+                /*if(!connected.has(p.peerId)){
+                    console.log("Peer list non ha  " + p.name)
+                    console.log("Peer list non ha  " + p.peerId)
+                }*/
+                /*if(p.peerId != pacman.peerId && p.isOnline && !connected.has(p.peerId)){
+                    p.isOnline = false
+                    state.setPacman(p)
+                    console.log("Offline pacman " + p.name)
+                    console.log("Offline pacman " + p.name)
+                }*/
+            }
+        }
+    }
+    // Constants
+    // =========
+    Game.GHOST_SPEED = 1.5;
+    Game.GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.25;
+
+    class KeyState {
+        constructor() {
+            // Keep track of current keys being pressed.
+            this.state = new Map();
+            let self = this;
+            document.body.addEventListener('keydown', function (event) {
+                self.state.set(event.code, true);
+            });
+            document.body.addEventListener('keyup', function (event) {
+                self.state.set(event.code, false);
+            });
+            document.body.addEventListener('blur', function (_) {
+                // Make it so that all keys are unpressed when the browser loses focus.
+                for (let key in self.state.keys()) {
+                    if (self.state.has(key))
+                        self.state.set(key, false);
+                }
+            });
+        }
+        getKeyState(key) {
+            if (this.state.has(key))
+                return this.state.get(key);
+            return false;
+        }
+    }
+
+    /**
+     * Description: A THREE loader for STL ASCII files, as created by Solidworks and other CAD programs.
+     *
+     * Supports both binary and ASCII encoded files, with automatic detection of type.
+     *
+     * The loader returns a non-indexed buffer geometry.
+     *
+     * Limitations:
+     *  Binary decoding supports "Magics" color format (http://en.wikipedia.org/wiki/STL_(file_format)#Color_in_binary_STL).
+     *  There is perhaps some question as to how valid it is to always assume little-endian-ness.
+     *  ASCII decoding assumes file is UTF-8.
+     *
+     * Usage:
+     *  const loader = new STLLoader();
+     *  loader.load( './models/stl/slotted_disk.stl', function ( geometry ) {
+     *    scene.add( new THREE.Mesh( geometry ) );
+     *  });
+     *
+     * For binary STLs geometry might contain colors for vertices. To use it:
+     *  // use the same code to load STL as above
+     *  if (geometry.hasColors) {
+     *    material = new THREE.MeshPhongMaterial({ opacity: geometry.alpha, vertexColors: true });
+     *  } else { .... }
+     *  const mesh = new THREE.Mesh( geometry, material );
+     *
+     * For ASCII STLs containing multiple solids, each solid is assigned to a different group.
+     * Groups can be used to assign a different color by defining an array of materials with the same length of
+     * geometry.groups and passing it to the Mesh constructor:
+     *
+     * const mesh = new THREE.Mesh( geometry, material );
+     *
+     * For example:
+     *
+     *  const materials = [];
+     *  const nGeometryGroups = geometry.groups.length;
+     *
+     *  const colorMap = ...; // Some logic to index colors.
+     *
+     *  for (let i = 0; i < nGeometryGroups; i++) {
+     *
+     *		const material = new THREE.MeshPhongMaterial({
+     *			color: colorMap[i],
+     *			wireframe: false
+     *		});
+     *
+     *  }
+     *
+     *  materials.push(material);
+     *  const mesh = new THREE.Mesh(geometry, materials);
+     */
+
+
+    class STLLoader extends Loader {
+
+    	constructor( manager ) {
+
+    		super( manager );
+
+    	}
+
+    	load( url, onLoad, onProgress, onError ) {
+
+    		const scope = this;
+
+    		const loader = new FileLoader( this.manager );
+    		loader.setPath( this.path );
+    		loader.setResponseType( 'arraybuffer' );
+    		loader.setRequestHeader( this.requestHeader );
+    		loader.setWithCredentials( this.withCredentials );
+
+    		loader.load( url, function ( text ) {
+
+    			try {
+
+    				onLoad( scope.parse( text ) );
+
+    			} catch ( e ) {
+
+    				if ( onError ) {
+
+    					onError( e );
+
+    				} else {
+
+    					console.error( e );
+
+    				}
+
+    				scope.manager.itemError( url );
+
+    			}
+
+    		}, onProgress, onError );
+
+    	}
+
+    	parse( data ) {
+
+    		function isBinary( data ) {
+
+    			const reader = new DataView( data );
+    			const face_size = ( 32 / 8 * 3 ) + ( ( 32 / 8 * 3 ) * 3 ) + ( 16 / 8 );
+    			const n_faces = reader.getUint32( 80, true );
+    			const expect = 80 + ( 32 / 8 ) + ( n_faces * face_size );
+
+    			if ( expect === reader.byteLength ) {
+
+    				return true;
+
+    			}
+
+    			// An ASCII STL data must begin with 'solid ' as the first six bytes.
+    			// However, ASCII STLs lacking the SPACE after the 'd' are known to be
+    			// plentiful.  So, check the first 5 bytes for 'solid'.
+
+    			// Several encodings, such as UTF-8, precede the text with up to 5 bytes:
+    			// https://en.wikipedia.org/wiki/Byte_order_mark#Byte_order_marks_by_encoding
+    			// Search for "solid" to start anywhere after those prefixes.
+
+    			// US-ASCII ordinal values for 's', 'o', 'l', 'i', 'd'
+
+    			const solid = [ 115, 111, 108, 105, 100 ];
+
+    			for ( let off = 0; off < 5; off ++ ) {
+
+    				// If "solid" text is matched to the current offset, declare it to be an ASCII STL.
+
+    				if ( matchDataViewAt( solid, reader, off ) ) return false;
+
+    			}
+
+    			// Couldn't find "solid" text at the beginning; it is binary STL.
+
+    			return true;
+
+    		}
+
+    		function matchDataViewAt( query, reader, offset ) {
+
+    			// Check if each byte in query matches the corresponding byte from the current offset
+
+    			for ( let i = 0, il = query.length; i < il; i ++ ) {
+
+    				if ( query[ i ] !== reader.getUint8( offset + i, false ) ) return false;
+
+    			}
+
+    			return true;
+
+    		}
+
+    		function parseBinary( data ) {
+
+    			const reader = new DataView( data );
+    			const faces = reader.getUint32( 80, true );
+
+    			let r, g, b, hasColors = false, colors;
+    			let defaultR, defaultG, defaultB, alpha;
+
+    			// process STL header
+    			// check for default color in header ("COLOR=rgba" sequence).
+
+    			for ( let index = 0; index < 80 - 10; index ++ ) {
+
+    				if ( ( reader.getUint32( index, false ) == 0x434F4C4F /*COLO*/ ) &&
+    					( reader.getUint8( index + 4 ) == 0x52 /*'R'*/ ) &&
+    					( reader.getUint8( index + 5 ) == 0x3D /*'='*/ ) ) {
+
+    					hasColors = true;
+    					colors = new Float32Array( faces * 3 * 3 );
+
+    					defaultR = reader.getUint8( index + 6 ) / 255;
+    					defaultG = reader.getUint8( index + 7 ) / 255;
+    					defaultB = reader.getUint8( index + 8 ) / 255;
+    					alpha = reader.getUint8( index + 9 ) / 255;
+
+    				}
+
+    			}
+
+    			const dataOffset = 84;
+    			const faceLength = 12 * 4 + 2;
+
+    			const geometry = new BufferGeometry();
+
+    			const vertices = new Float32Array( faces * 3 * 3 );
+    			const normals = new Float32Array( faces * 3 * 3 );
+
+    			for ( let face = 0; face < faces; face ++ ) {
+
+    				const start = dataOffset + face * faceLength;
+    				const normalX = reader.getFloat32( start, true );
+    				const normalY = reader.getFloat32( start + 4, true );
+    				const normalZ = reader.getFloat32( start + 8, true );
+
+    				if ( hasColors ) {
+
+    					const packedColor = reader.getUint16( start + 48, true );
+
+    					if ( ( packedColor & 0x8000 ) === 0 ) {
+
+    						// facet has its own unique color
+
+    						r = ( packedColor & 0x1F ) / 31;
+    						g = ( ( packedColor >> 5 ) & 0x1F ) / 31;
+    						b = ( ( packedColor >> 10 ) & 0x1F ) / 31;
+
+    					} else {
+
+    						r = defaultR;
+    						g = defaultG;
+    						b = defaultB;
+
+    					}
+
+    				}
+
+    				for ( let i = 1; i <= 3; i ++ ) {
+
+    					const vertexstart = start + i * 12;
+    					const componentIdx = ( face * 3 * 3 ) + ( ( i - 1 ) * 3 );
+
+    					vertices[ componentIdx ] = reader.getFloat32( vertexstart, true );
+    					vertices[ componentIdx + 1 ] = reader.getFloat32( vertexstart + 4, true );
+    					vertices[ componentIdx + 2 ] = reader.getFloat32( vertexstart + 8, true );
+
+    					normals[ componentIdx ] = normalX;
+    					normals[ componentIdx + 1 ] = normalY;
+    					normals[ componentIdx + 2 ] = normalZ;
+
+    					if ( hasColors ) {
+
+    						colors[ componentIdx ] = r;
+    						colors[ componentIdx + 1 ] = g;
+    						colors[ componentIdx + 2 ] = b;
+
+    					}
+
+    				}
+
+    			}
+
+    			geometry.setAttribute( 'position', new BufferAttribute( vertices, 3 ) );
+    			geometry.setAttribute( 'normal', new BufferAttribute( normals, 3 ) );
+
+    			if ( hasColors ) {
+
+    				geometry.setAttribute( 'color', new BufferAttribute( colors, 3 ) );
+    				geometry.hasColors = true;
+    				geometry.alpha = alpha;
+
+    			}
+
+    			return geometry;
+
+    		}
+
+    		function parseASCII( data ) {
+
+    			const geometry = new BufferGeometry();
+    			const patternSolid = /solid([\s\S]*?)endsolid/g;
+    			const patternFace = /facet([\s\S]*?)endfacet/g;
+    			let faceCounter = 0;
+
+    			const patternFloat = /[\s]+([+-]?(?:\d*)(?:\.\d*)?(?:[eE][+-]?\d+)?)/.source;
+    			const patternVertex = new RegExp( 'vertex' + patternFloat + patternFloat + patternFloat, 'g' );
+    			const patternNormal = new RegExp( 'normal' + patternFloat + patternFloat + patternFloat, 'g' );
+
+    			const vertices = [];
+    			const normals = [];
+
+    			const normal = new Vector3();
+
+    			let result;
+
+    			let groupCount = 0;
+    			let startVertex = 0;
+    			let endVertex = 0;
+
+    			while ( ( result = patternSolid.exec( data ) ) !== null ) {
+
+    				startVertex = endVertex;
+
+    				const solid = result[ 0 ];
+
+    				while ( ( result = patternFace.exec( solid ) ) !== null ) {
+
+    					let vertexCountPerFace = 0;
+    					let normalCountPerFace = 0;
+
+    					const text = result[ 0 ];
+
+    					while ( ( result = patternNormal.exec( text ) ) !== null ) {
+
+    						normal.x = parseFloat( result[ 1 ] );
+    						normal.y = parseFloat( result[ 2 ] );
+    						normal.z = parseFloat( result[ 3 ] );
+    						normalCountPerFace ++;
+
+    					}
+
+    					while ( ( result = patternVertex.exec( text ) ) !== null ) {
+
+    						vertices.push( parseFloat( result[ 1 ] ), parseFloat( result[ 2 ] ), parseFloat( result[ 3 ] ) );
+    						normals.push( normal.x, normal.y, normal.z );
+    						vertexCountPerFace ++;
+    						endVertex ++;
+
+    					}
+
+    					// every face have to own ONE valid normal
+
+    					if ( normalCountPerFace !== 1 ) {
+
+    						console.error( 'THREE.STLLoader: Something isn\'t right with the normal of face number ' + faceCounter );
+
+    					}
+
+    					// each face have to own THREE valid vertices
+
+    					if ( vertexCountPerFace !== 3 ) {
+
+    						console.error( 'THREE.STLLoader: Something isn\'t right with the vertices of face number ' + faceCounter );
+
+    					}
+
+    					faceCounter ++;
+
+    				}
+
+    				const start = startVertex;
+    				const count = endVertex - startVertex;
+
+    				geometry.addGroup( start, count, groupCount );
+    				groupCount ++;
+
+    			}
+
+    			geometry.setAttribute( 'position', new Float32BufferAttribute( vertices, 3 ) );
+    			geometry.setAttribute( 'normal', new Float32BufferAttribute( normals, 3 ) );
+
+    			return geometry;
+
+    		}
+
+    		function ensureString( buffer ) {
+
+    			if ( typeof buffer !== 'string' ) {
+
+    				return LoaderUtils.decodeText( new Uint8Array( buffer ) );
+
+    			}
+
+    			return buffer;
+
+    		}
+
+    		function ensureBinary( buffer ) {
+
+    			if ( typeof buffer === 'string' ) {
+
+    				const array_buffer = new Uint8Array( buffer.length );
+    				for ( let i = 0; i < buffer.length; i ++ ) {
+
+    					array_buffer[ i ] = buffer.charCodeAt( i ) & 0xff; // implicitly assumes little-endian
+
+    				}
+
+    				return array_buffer.buffer || array_buffer;
+
+    			} else {
+
+    				return buffer;
+
+    			}
+
+    		}
+
+    		// start
+
+    		const binData = ensureBinary( data );
+
+    		return isBinary( binData ) ? parseBinary( binData ) : parseASCII( ensureString( data ) );
+
+    	}
+
+    }
+
+    class Ghost {
+        constructor(id, position, afterLoading = () => { }) {
+            if (Ghost.loadedGeometry == null) {
+                let stlLoader = new STLLoader();
+                let self = this;
+                stlLoader.load('misc/ghost.stl', (geometry) => {
+                    Ghost.loadedGeometry = geometry;
+                    self.makeMesh(position);
+                    afterLoading();
+                }, (xhr) => { }, (error) => {
+                    console.log(error);
+                });
+            }
+            else {
+                this.makeMesh(position);
+                afterLoading();
+            }
+            this.id = id;
+            this.direction = new Vector3(-1, 0, 0);
+            this.state = 0;
+            this.pacmanTarget = null;
+            this.initialPosition = position.clone();
+        }
+        // Make 3d mesh
+        makeMesh(position) {
+            let dotMaterial = new MeshPhongMaterial({ color: 'red', side: DoubleSide });
+            dotMaterial.flatShading = false;
+            this.mesh = new Mesh(Ghost.loadedGeometry, dotMaterial);
+            this.mesh.geometry.computeVertexNormals();
+            this.mesh.position.set(position.x, position.y, position.z + Ghost.Z_OFFSET);
+            this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE);
+        }
+        // Set visible property
+        setVisible(value) {
+            this.mesh.visible = value;
+        }
+        // Get ghost position
+        getPosition() {
+            return this.mesh.position;
+        }
+        // Add ghost mesh to 3d scene
+        addToScene(scene) {
+            scene.add(this.mesh);
+        }
+        // Update ghost position based on current state
+        moveGhost(delta, levelMap) {
+            var previousPosition = new Vector3();
+            var currentPosition = new Vector3();
+            var leftTurn = new Vector3();
+            var rightTurn = new Vector3();
+            previousPosition.copy(this.mesh.position).addScaledVector(this.direction, 0.5).round();
+            this.mesh.translateOnAxis(this.direction, delta * Ghost.GHOST_SPEED);
+            currentPosition.copy(this.mesh.position).addScaledVector(this.direction, 0.5).round();
+            // If the ghost is transitioning from one cell to the next, see if they can turn.
+            if (!currentPosition.equals(previousPosition)) {
+                leftTurn.copy(this.direction).applyAxisAngle(Utils.UP, Math.PI / 2);
+                rightTurn.copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2);
+                var forwardWall = levelMap.isWall(currentPosition, true);
+                var leftWall = levelMap.isWall(currentPosition.copy(this.mesh.position).add(leftTurn), true);
+                var rightWall = levelMap.isWall(currentPosition.copy(this.mesh.position).add(rightTurn), true);
+                if (!leftWall || !rightWall) {
+                    // If the ghsot can turn, randomly choose one of the possible turns.
+                    var possibleTurns = [];
+                    if (!forwardWall)
+                        possibleTurns.push(this.direction);
+                    if (!leftWall)
+                        possibleTurns.push(leftTurn);
+                    if (!rightWall)
+                        possibleTurns.push(rightTurn);
+                    if (possibleTurns.length === 0)
+                        throw new Error('A ghost got stuck!');
+                    var newDirection = possibleTurns[Math.floor(Math.random() * possibleTurns.length)];
+                    this.direction.copy(newDirection);
+                    // Snap ghost to center of current cell and start moving in new direction.
+                    this.mesh.position.round().addScaledVector(this.direction, delta);
+                }
+            }
+            levelMap.wrapObject(this.mesh);
+        }
+        // Get plain js object
+        toPlainObj() {
+            let obj = {};
+            obj["id"] = this.id;
+            obj["position"] = [this.mesh.position.x, this.mesh.position.y, this.mesh.position.z];
+            obj["direction"] = [this.direction.x, this.direction.y, this.direction.z];
+            obj["initialPosition"] = [this.initialPosition.x, this.initialPosition.y, this.initialPosition.z];
+            obj["pacmanTarget"] = this.pacmanTarget;
+            obj["state"] = this.state;
+            return obj;
+        }
+        // New ghost from plain js object
+        static fromObj(obj) {
+            let position = new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]);
+            let out = new Ghost(obj["id"], position);
+            out.copyObj(obj);
+            return out;
+        }
+        copyObj(obj) {
+            this.mesh.position.copy(new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]));
+            this.direction.copy(new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]));
+            this.initialPosition = new Vector3(obj["initialPosition"][0], obj["initialPosition"][1], obj["initialPosition"][2]);
+            this.pacmanTarget = obj["pacmanTarget"];
+            this.state = obj["state"];
+        }
+    }
+    Ghost.GHOST_SCALE = 0.162;
+    Ghost.Z_OFFSET = -0.2;
+    Ghost.GHOST_SPEED = 1.5;
+    Ghost.GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.1;
+
+    class World {
+        constructor(scene, state) {
+            let dotId = 0;
+            let ghostId = 0;
+            this.bottom = -(World.LEVEL.length - 1);
+            this.top = this.left = this.right = 0;
+            this.numDots = 0;
+            this.pacmanSpawn = null;
+            this.ghostSpawn = null;
+            this.map = {};
+            let x, y;
+            for (let row = 0; row < World.LEVEL.length; row++) {
+                // Set the coordinates of the map so that they match the
+                // coordinate system for objects.
+                y = -row;
+                this.map[y] = {};
+                // Get the length of the longest row in the level definition.
+                let length = Math.floor(World.LEVEL[row].length / 2);
+                //map.right = Math.max(map.right, length - 1)
+                this.right = Math.max(this.right, length);
+                // Skip every second element, which is just a space for readability.
+                for (let column = 0; column < World.LEVEL[row].length; column += 2) {
+                    x = Math.floor(column / 2);
+                    let cell = World.LEVEL[row][column];
+                    if (cell === '#') {
+                        let wall = new Wall(x, y);
+                        wall.addToScene(scene);
+                        this.map[y][x] = wall;
+                    }
+                    else if (cell === 'X') {
+                        let wall = new Wall(x, y, true);
+                        wall.addToScene(scene);
+                        this.map[y][x] = wall;
+                    }
+                    else if (cell === '.') {
+                        // Add dot to global shared state
+                        let dot = new Dot(dotId.toString(), new Vector3(x, y, 0));
+                        state.initDot(dot);
+                        dot.addToScene(scene);
+                        dotId++;
+                        this.map[y][x] = dot;
+                    }
+                    else if (cell === 'o') {
+                        let dot = new Dot(dotId.toString(), new Vector3(x, y, 0), true);
+                        state.initDot(dot);
+                        dot.addToScene(scene);
+                        dotId++;
+                        this.map[y][x] = dot;
+                    }
+                    else if (cell === 'P') {
+                        this.pacmanSpawn = new Vector3(x, y, 0);
+                    }
+                    else if (cell === 'G') {
+                        let ghost = new Ghost(ghostId.toString(), new Vector3(x, y, 0), () => {
+                            ghost.addToScene(scene);
+                            state.setGhost(ghost);
+                        });
+                        ghostId++;
+                        this.ghostSpawn = new Vector3(x, y, 0);
+                    }
+                }
+            }
+            this.centerX = (this.left + this.right) / 2;
+            this.centerY = (this.bottom + this.top) / 2;
+        }
+        getAt(position) {
+            let x = Math.round(position.x), y = Math.round(position.y);
+            return this.map[y] && this.map[y][x];
+        }
+        isWall(position, isGhost = false) {
+            let cell = this.getAt(position);
+            return (!isGhost) ?
+                (cell instanceof Wall) : // isPacman
+                (cell instanceof Wall && !cell.isPassable); //isGhost
+        }
+        // Wrap object to map limit
+        wrapObject(object) {
+            if (object.position.x < this.left)
+                object.position.x = this.right;
+            else if (object.position.x > this.right)
+                object.position.x = this.left;
+            if (object.position.y > this.top)
+                object.position.y = this.bottom;
+            else if (object.position.y < this.bottom)
+                object.position.y = this.top;
+        }
+    }
+    World.LEVEL = [
+        '# # # # # # # # # # # # # # # # # # # # # # # # # # # #',
+        '# . . . . . . . . . . . . # # . . . . . . . . . . . . #',
+        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
+        '# o # # # # . # # # # # . # # . # # # # # . # # # # o #',
+        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
+        '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
+        '# . # # # # . # # . # # # # # # # # . # # . # # # # . #',
+        '# . # # # # . # # . # # # # # # # # . # # . # # # # . #',
+        '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
+        '# # # # # # . # # # # #   # #   # # # # # . # # # # # #',
+        '          # . # # # # #   # #   # # # # # . #          ',
+        '          # . # #                     # # . #          ',
+        '          # . # #   # # # X X # # #   # # . #          ',
+        '# # # # # # . # #   #     G   G   #   # # . # # # # # #',
+        '            .       #   G   G     #       .            ',
+        '# # # # # # . # #   #             #   # # . # # # # # #',
+        '          # . # #   # # # # # # # #   # # . #          ',
+        '          # . # #                     # # . #          ',
+        '          # . # #   # # # # # # # #   # # . #          ',
+        '# # # # # # . # #   # # # # # # # #   # # . # # # # # #',
+        '# . . . . . . . . . . . . # # . . . . . . . . . . . . #',
+        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
+        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
+        '# o . . # # . . . . . . . P   . . . . . . . # # . . o #',
+        '# # # . # # . # # . # # # # # # # # . # # . # # . # # #',
+        '# # # . # # . # # . # # # # # # # # . # # . # # . # # #',
+        '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
+        '# . # # # # # # # # # # . # # . # # # # # # # # # # . #',
+        '# . # # # # # # # # # # . # # . # # # # # # # # # # . #',
+        '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
+        '# # # # # # # # # # # # # # # # # # # # # # # # # # # #'
+    ];
+    class Wall {
+        constructor(x, y, isPassable = false) {
+            let wallGeometry = new BoxGeometry(1, 1, 1);
+            let wallMaterial = new MeshLambertMaterial({ color: 'blue' });
+            this.mesh = new Mesh(wallGeometry, wallMaterial);
+            this.mesh.position.set(x, y, 0);
+            this.isPassable = isPassable;
+            this.mesh.visible = !isPassable;
+        }
+        addToScene(scene) {
+            scene.add(this.mesh);
+        }
+    }
+    class Dot {
+        constructor(id, position, isPowerDot = false) {
+            this.isPowerDot = isPowerDot;
+            let dotGeometry = isPowerDot ? new SphereGeometry(Dot.DOT_RADIUS_POWER) : new SphereGeometry(Dot.DOT_RADIUS);
+            let dotMaterial = new MeshPhongMaterial({ color: 0xFFDAB9 }); // Paech color
+            this.mesh = new Mesh(dotGeometry, dotMaterial);
+            this.mesh.position.copy(position);
+            this.id = id;
+            this.pacmanId = null;
+        }
+        setVisible(value) {
+            this.mesh.visible = value;
+        }
+        getPosition() {
+            return this.mesh.position;
+        }
+        isVisible() {
+            return this.pacmanId == null;
+        }
+        addToScene(scene) {
+            scene.add(this.mesh);
+        }
+    }
+    Dot.DOT_RADIUS = 0.1;
+    Dot.DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2;
+
+    writable(new Array());
+    class GameState {
+        constructor(ydoc) {
+            this.ydoc = ydoc;
+            this.pacmansShared = ydoc.getMap('pacmans');
+            this.pacmansLocal = new Map();
+            this.ghostsShared = ydoc.getMap('ghosts');
+            this.ghostsLocal = new Map();
+            this.dotsShared = ydoc.getMap('dots');
+            this.dotsMap = {};
+            //this.pacmanDelIndex = 0
+            this.currentPacman = null;
+        }
+        setCurrentPacman(currentPacman) {
+            this.currentPacman = currentPacman;
+        }
+        updatePacmanLocal(scene) {
+            this.pacmansShared.forEach((value, key) => {
+                let pLocal = this.pacmansLocal.get(key);
+                if (pLocal != null) {
+                    if (this.currentPacman && this.currentPacman.id != pLocal.id) {
+                        // Update pacman object
+                        pLocal.copyObjIfSameId(value);
+                        //pLocal.deletedFlag = this.pacmanDelIndex
+                    }
+                }
+                else {
+                    // Add new pacman object
+                    let pacman = Pacman.fromObj(value);
+                    pacman.makeTextNick();
+                    this.pacmansLocal.set(key, pacman);
+                    // Add pacman to scene
+                    pacman.addToScene(scene);
+                }
+            });
+        }
+        setPacman(pacman) {
+            this.pacmansShared.set(pacman.id, pacman.toPlainObj());
+            this.pacmansLocal.set(pacman.id, pacman);
+        }
+        getPacmansList() {
+            return this.pacmansLocal.values();
+        }
+        getPacmansMap() {
+            return this.pacmansLocal;
+        }
+        updateGhostsLocal() {
+            this.ghostsShared.forEach((value, key) => {
+                let gLocal = this.ghostsLocal.get(key);
+                if (gLocal && gLocal.pacmanTarget != this.currentPacman.id)
+                    gLocal.copyObj(value);
+            });
+        }
+        updateGhostsShared() {
+            this.ydoc.transact(() => {
+                this.ghostsLocal.forEach((ghost) => {
+                    this.ghostsShared.set(ghost.id, ghost.toPlainObj());
+                });
+            });
+        }
+        setGhost(ghost) {
+            this.ghostsShared.set(ghost.id, ghost.toPlainObj());
+            this.ghostsLocal.set(ghost.id, ghost);
+        }
+        getGhosts() {
+            return this.ghostsLocal.values();
+        }
+        updateDotsLocal() {
+            for (const y in this.dotsMap) {
+                for (const x in this.dotsMap[y]) {
+                    let dot = this.dotsMap[y][x];
+                    let pacmanId = this.dotsShared.get(dot.id);
+                    if (pacmanId) {
+                        dot.setVisible(false);
+                    }
+                    else {
+                        dot.setVisible(true);
+                    }
+                }
+            }
+        }
+        initDot(dot) {
+            // Add to map
+            let x = dot.getPosition().x;
+            let y = dot.getPosition().y;
+            if (!this.dotsMap.hasOwnProperty(y)) {
+                this.dotsMap[y] = {};
+            }
+            this.dotsMap[y][x] = dot;
+        }
+        // Update dot state
+        updateDotShared(dot) {
+            if (dot.pacmanId) {
+                this.dotsShared.set(dot.id, dot.pacmanId);
+            }
+        }
+        getDot(x, y) {
+            try {
+                return this.dotsMap[y][x];
+            }
+            catch (e) {
+                console.log(e);
+                return null;
+            }
+        }
+        checkIfAllPlaying() {
+            let out = true;
+            this.pacmansShared.forEach((value, key) => {
+                if (!value["isPlaying"] && value["isOnline"])
+                    out = false;
+            });
+            return out;
+        }
+        setCurrentPacmanPlaying(value) {
+            this.currentPacman.isPlaying = value;
+            this.setPacman(this.currentPacman);
+        }
+    }
+
+    /* src\pages\Game.svelte generated by Svelte v3.44.3 */
+
+    const { console: console_1$1 } = globals;
+
+    function create_fragment$1(ctx) {
+    	const block = {
+    		c: noop,
+    		l: function claim(nodes) {
+    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
+    		},
+    		m: noop,
+    		p: noop,
+    		i: noop,
+    		o: noop,
+    		d: noop
+    	};
+
+    	dispatch_dev("SvelteRegisterBlock", {
+    		block,
+    		id: create_fragment$1.name,
+    		type: "component",
+    		source: "",
+    		ctx
+    	});
+
+    	return block;
+    }
+
+    function instance$1($$self, $$props, $$invalidate) {
+    	let $pacmanName;
+    	let $pacmanId;
+    	validate_store(pacmanName, 'pacmanName');
+    	component_subscribe($$self, pacmanName, $$value => $$invalidate(3, $pacmanName = $$value));
+    	validate_store(pacmanId, 'pacmanId');
+    	component_subscribe($$self, pacmanId, $$value => $$invalidate(4, $pacmanId = $$value));
+    	let { $$slots: slots = {}, $$scope } = $$props;
+    	validate_slots('Game', slots, []);
+    	let { ydoc } = $$props;
+    	let { provider } = $$props;
+    	console.log("Game created");
+
+    	onMount(() => {
+    		
+    	});
+
+    	onDestroy(() => {
+    		document.body.removeChild(renderer.domElement);
+    	}); //clearInterval(interval)
+
+    	let game = new Game();
+    	let keys = new KeyState();
+    	let renderer = game.createRenderer();
+    	let scene = game.createScene();
+    	let state = new GameState(ydoc);
+    	let map = new World(scene, state);
+    	let pacman = new Pacman($pacmanId, $pacmanName, provider.room.peerId, map.pacmanSpawn);
+    	state.setCurrentPacman(pacman);
+    	globalState.set(state);
+    	pacman.addToScene(scene);
+    	let camera = new Camera(renderer, pacman);
+
+    	//let hudCamera = game.createHudCamera(map)
+    	let frameCounter = 0;
+
+    	let recomputeGhostTargetFrame = Math.floor(Math.random() * 60);
+
+    	// Main game loop
+    	game.gameLoop(delta => {
+    		// Update local state
+    		state.updatePacmanLocal(scene);
+
+    		state.updateGhostsLocal();
+    		state.updateDotsLocal();
+    		pacman.movePacman(delta, keys, map, state);
+
+    		// Update other pacman frames
+    		for (let p of state.getPacmansList()) {
+    			p.updateFrame(pacman);
+    		}
+
+    		// Update pacam camera
+    		camera.updateCamera(delta);
+
+    		// Set current pacman state
+    		state.setPacman(pacman);
+
+    		// Compute target for necessary ghosts
+    		if (frameCounter % recomputeGhostTargetFrame == 0) {
+    			game.computeGhostTarget(state, frameCounter == 0);
+    		}
+
+    		// Update ghosts position
+    		for (let g of state.getGhosts()) {
+    			if (g.pacmanTarget && g.pacmanTarget == pacman.id) {
+    				g.moveGhost(delta, map);
+    				state.setGhost(g);
+    			}
+    		}
+
+    		// Render main view
+    		renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
+
+    		renderer.render(scene, camera.get());
+
+    		// Render HUD
+    		//renderHud(renderer, hudCamera, scene)
+    		if (frameCounter % 30 == 0) {
+    			game.controlOfflinePacmans(provider, state);
+    		}
+
+    		frameCounter++;
+    	});
+
+    	const writable_props = ['ydoc', 'provider'];
+
+    	Object.keys($$props).forEach(key => {
+    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<Game> was created with unknown prop '${key}'`);
+    	});
+
+    	$$self.$$set = $$props => {
+    		if ('ydoc' in $$props) $$invalidate(0, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(1, provider = $$props.provider);
+    	};
+
+    	$$self.$capture_state = () => ({
+    		Camera,
+    		Game,
+    		KeyState,
+    		World,
+    		Pacman,
+    		GameState,
+    		pacmanName,
+    		pacmanId,
+    		globalState,
+    		onMount,
+    		onDestroy,
+    		ydoc,
+    		provider,
+    		game,
+    		keys,
+    		renderer,
+    		scene,
+    		state,
+    		map,
+    		pacman,
+    		camera,
+    		frameCounter,
+    		recomputeGhostTargetFrame,
+    		$pacmanName,
+    		$pacmanId
+    	});
+
+    	$$self.$inject_state = $$props => {
+    		if ('ydoc' in $$props) $$invalidate(0, ydoc = $$props.ydoc);
+    		if ('provider' in $$props) $$invalidate(1, provider = $$props.provider);
+    		if ('game' in $$props) game = $$props.game;
+    		if ('keys' in $$props) keys = $$props.keys;
+    		if ('renderer' in $$props) renderer = $$props.renderer;
+    		if ('scene' in $$props) scene = $$props.scene;
+    		if ('state' in $$props) state = $$props.state;
+    		if ('map' in $$props) map = $$props.map;
+    		if ('pacman' in $$props) pacman = $$props.pacman;
+    		if ('camera' in $$props) camera = $$props.camera;
+    		if ('frameCounter' in $$props) frameCounter = $$props.frameCounter;
+    		if ('recomputeGhostTargetFrame' in $$props) recomputeGhostTargetFrame = $$props.recomputeGhostTargetFrame;
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
+
+    	return [ydoc, provider];
+    }
+
+    class Game_1 extends SvelteComponentDev {
+    	constructor(options) {
+    		super(options);
+    		init(this, options, instance$1, create_fragment$1, safe_not_equal, { ydoc: 0, provider: 1 });
+
+    		dispatch_dev("SvelteRegisterComponent", {
+    			component: this,
+    			tagName: "Game_1",
+    			options,
+    			id: create_fragment$1.name
+    		});
+
+    		const { ctx } = this.$$;
+    		const props = options.props || {};
+
+    		if (/*ydoc*/ ctx[0] === undefined && !('ydoc' in props)) {
+    			console_1$1.warn("<Game> was created without expected prop 'ydoc'");
+    		}
+
+    		if (/*provider*/ ctx[1] === undefined && !('provider' in props)) {
+    			console_1$1.warn("<Game> was created without expected prop 'provider'");
+    		}
+    	}
+
+    	get ydoc() {
+    		throw new Error("<Game>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set ydoc(value) {
+    		throw new Error("<Game>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	get provider() {
+    		throw new Error("<Game>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
+
+    	set provider(value) {
+    		throw new Error("<Game>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
+    	}
     }
 
     /**
@@ -44208,6 +50132,228 @@ var app = (function () {
      * @return {boolean} Wether n is negative. This function also differentiates between -0 and +0
      */
     const isNegativeZero = n => n !== 0 ? n < 0 : 1 / n < 0;
+
+    /**
+     * Utility module to work with time.
+     *
+     * @module time
+     */
+
+    /**
+     * Return current unix time.
+     *
+     * @return {number}
+     */
+    const getUnixTime = Date.now;
+
+    /* eslint-env browser */
+
+    const reconnectTimeoutBase = 1200;
+    const maxReconnectTimeout = 2500;
+    // @todo - this should depend on awareness.outdatedTime
+    const messageReconnectTimeout = 30000;
+
+    /**
+     * @param {WebsocketClient} wsclient
+     */
+    const setupWS = (wsclient) => {
+      if (wsclient.shouldConnect && wsclient.ws === null) {
+        const websocket = new WebSocket(wsclient.url);
+        const binaryType = wsclient.binaryType;
+        /**
+         * @type {any}
+         */
+        let pingTimeout = null;
+        if (binaryType) {
+          websocket.binaryType = binaryType;
+        }
+        wsclient.ws = websocket;
+        wsclient.connecting = true;
+        wsclient.connected = false;
+        websocket.onmessage = event => {
+          wsclient.lastMessageReceived = getUnixTime();
+          const data = event.data;
+          const message = typeof data === 'string' ? JSON.parse(data) : data;
+          if (message && message.type === 'pong') {
+            clearTimeout(pingTimeout);
+            pingTimeout = setTimeout(sendPing, messageReconnectTimeout / 2);
+          }
+          wsclient.emit('message', [message, wsclient]);
+        };
+        /**
+         * @param {any} error
+         */
+        const onclose = error => {
+          if (wsclient.ws !== null) {
+            wsclient.ws = null;
+            wsclient.connecting = false;
+            if (wsclient.connected) {
+              wsclient.connected = false;
+              wsclient.emit('disconnect', [{ type: 'disconnect', error }, wsclient]);
+            } else {
+              wsclient.unsuccessfulReconnects++;
+            }
+            // Start with no reconnect timeout and increase timeout by
+            // log10(wsUnsuccessfulReconnects).
+            // The idea is to increase reconnect timeout slowly and have no reconnect
+            // timeout at the beginning (log(1) = 0)
+            setTimeout(setupWS, min(log10(wsclient.unsuccessfulReconnects + 1) * reconnectTimeoutBase, maxReconnectTimeout), wsclient);
+          }
+          clearTimeout(pingTimeout);
+        };
+        const sendPing = () => {
+          if (wsclient.ws === websocket) {
+            wsclient.send({
+              type: 'ping'
+            });
+          }
+        };
+        websocket.onclose = () => onclose(null);
+        websocket.onerror = error => onclose(error);
+        websocket.onopen = () => {
+          wsclient.lastMessageReceived = getUnixTime();
+          wsclient.connecting = false;
+          wsclient.connected = true;
+          wsclient.unsuccessfulReconnects = 0;
+          wsclient.emit('connect', [{ type: 'connect' }, wsclient]);
+          // set ping
+          pingTimeout = setTimeout(sendPing, messageReconnectTimeout / 2);
+        };
+      }
+    };
+
+    /**
+     * @extends Observable<string>
+     */
+    class WebsocketClient extends Observable {
+      /**
+       * @param {string} url
+       * @param {object} [opts]
+       * @param {'arraybuffer' | 'blob' | null} [opts.binaryType] Set `ws.binaryType`
+       */
+      constructor (url, { binaryType } = {}) {
+        super();
+        this.url = url;
+        /**
+         * @type {WebSocket?}
+         */
+        this.ws = null;
+        this.binaryType = binaryType || null;
+        this.connected = false;
+        this.connecting = false;
+        this.unsuccessfulReconnects = 0;
+        this.lastMessageReceived = 0;
+        /**
+         * Whether to connect to other peers or not
+         * @type {boolean}
+         */
+        this.shouldConnect = true;
+        this._checkInterval = setInterval(() => {
+          if (this.connected && messageReconnectTimeout < getUnixTime() - this.lastMessageReceived) {
+            // no message received in a long time - not even your own awareness
+            // updates (which are updated every 15 seconds)
+            /** @type {WebSocket} */ (this.ws).close();
+          }
+        }, messageReconnectTimeout / 2);
+        setupWS(this);
+      }
+
+      /**
+       * @param {any} message
+       */
+      send (message) {
+        if (this.ws) {
+          this.ws.send(JSON.stringify(message));
+        }
+      }
+
+      destroy () {
+        clearInterval(this._checkInterval);
+        this.disconnect();
+        super.destroy();
+      }
+
+      disconnect () {
+        this.shouldConnect = false;
+        if (this.ws !== null) {
+          this.ws.close();
+        }
+      }
+
+      connect () {
+        this.shouldConnect = true;
+        if (!this.connected && this.ws === null) {
+          setupWS(this);
+        }
+      }
+    }
+
+    /**
+     * Error helpers.
+     *
+     * @module error
+     */
+
+    /* istanbul ignore next */
+    /**
+     * @param {string} s
+     * @return {Error}
+     */
+    const create$3 = s => new Error(s);
+
+    /* istanbul ignore next */
+    /**
+     * @throws {Error}
+     * @return {never}
+     */
+    const methodUnimplemented = () => {
+      throw create$3('Method unimplemented')
+    };
+
+    /* istanbul ignore next */
+    /**
+     * @throws {Error}
+     * @return {never}
+     */
+    const unexpectedCase = () => {
+      throw create$3('Unexpected case')
+    };
+
+    /* eslint-env browser */
+
+    const isoCrypto = typeof crypto === 'undefined' ? null : crypto;
+
+    /**
+     * @type {function(number):ArrayBuffer}
+     */
+    const cryptoRandomBuffer = isoCrypto !== null
+      ? len => {
+        // browser
+        const buf = new ArrayBuffer(len);
+        const arr = new Uint8Array(buf);
+        isoCrypto.getRandomValues(arr);
+        return buf
+      }
+      : len => {
+        // polyfill
+        const buf = new ArrayBuffer(len);
+        const arr = new Uint8Array(buf);
+        for (let i = 0; i < len; i++) {
+          arr[i] = Math.ceil((Math.random() * 0xFFFFFFFF) >>> 0);
+        }
+        return buf
+      };
+
+    const rand = Math.random;
+
+    /* istanbul ignore next */
+    const uint32 = () => new Uint32Array(cryptoRandomBuffer(4))[0];
+
+    // @ts-ignore
+    const uuidv4Template = [1e7] + -1e3 + -4e3 + -8e3 + -1e11;
+    const uuidv4 = () => uuidv4Template.replace(/[018]/g, /** @param {number} c */ c =>
+      (c ^ uint32() & 15 >> c / 4).toString(16)
+    );
 
     /**
      * Utility module to work with strings.
@@ -45576,117 +51722,72 @@ var app = (function () {
       }
     }
 
+    /**
+     * Utility module to work with EcmaScript Symbols.
+     *
+     * @module symbol
+     */
+
+    /**
+     * Return fresh symbol.
+     *
+     * @return {Symbol}
+     */
+    const create$2 = Symbol;
+
+    /**
+     * Working with value pairs.
+     *
+     * @module pair
+     */
+
+    /**
+     * @template L,R
+     */
+    class Pair {
+      /**
+       * @param {L} left
+       * @param {R} right
+       */
+      constructor (left, right) {
+        this.left = left;
+        this.right = right;
+      }
+    }
+
+    /**
+     * @template L,R
+     * @param {L} left
+     * @param {R} right
+     * @return {Pair<L,R>}
+     */
+    const create$1 = (left, right) => new Pair(left, right);
+
     /* eslint-env browser */
 
-    const isoCrypto = typeof crypto === 'undefined' ? null : crypto;
-
-    /**
-     * @type {function(number):ArrayBuffer}
-     */
-    const cryptoRandomBuffer = isoCrypto !== null
-      ? len => {
-        // browser
-        const buf = new ArrayBuffer(len);
-        const arr = new Uint8Array(buf);
-        isoCrypto.getRandomValues(arr);
-        return buf
-      }
-      : len => {
-        // polyfill
-        const buf = new ArrayBuffer(len);
-        const arr = new Uint8Array(buf);
-        for (let i = 0; i < len; i++) {
-          arr[i] = Math.ceil((Math.random() * 0xFFFFFFFF) >>> 0);
-        }
-        return buf
-      };
-
-    const rand = Math.random;
-
-    /* istanbul ignore next */
-    const uint32 = () => new Uint32Array(cryptoRandomBuffer(4))[0];
-
-    // @ts-ignore
-    const uuidv4Template = [1e7] + -1e3 + -4e3 + -8e3 + -1e11;
-    const uuidv4 = () => uuidv4Template.replace(/[018]/g, /** @param {number} c */ c =>
-      (c ^ uint32() & 15 >> c / 4).toString(16)
-    );
-
-    /**
-     * Utility module to work with time.
-     *
-     * @module time
-     */
-
-    /**
-     * Return current unix time.
-     *
-     * @return {number}
-     */
-    const getUnixTime = Date.now;
-
-    /**
-     * Utility helpers to work with promises.
-     *
-     * @module promise
-     */
-
-    /**
-     * @template T
-     * @callback PromiseResolve
-     * @param {T|PromiseLike<T>} [result]
-     */
-
-    /**
-     * @template T
-     * @param {function(PromiseResolve<T>,function(Error):void):any} f
-     * @return {Promise<T>}
-     */
-    const create$3 = f => /** @type {Promise<T>} */ (new Promise(f));
-
-    /**
-     * @param {Error} [reason]
-     * @return {Promise<never>}
-     */
-    const reject = reason => Promise.reject(reason);
-
-    /**
-     * @template T
-     * @param {T|void} res
-     * @return {Promise<T|void>}
-     */
-    const resolve = res => Promise.resolve(res);
-
-    /**
-     * Error helpers.
-     *
-     * @module error
-     */
-
     /* istanbul ignore next */
     /**
-     * @param {string} s
-     * @return {Error}
+     * @type {Document}
      */
-    const create$2 = s => new Error(s);
+    const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
 
     /* istanbul ignore next */
-    /**
-     * @throws {Error}
-     * @return {never}
-     */
-    const methodUnimplemented = () => {
-      throw create$2('Method unimplemented')
-    };
+    /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
 
-    /* istanbul ignore next */
     /**
-     * @throws {Error}
-     * @return {never}
+     * @param {Map<string,string>} m
+     * @return {string}
      */
-    const unexpectedCase = () => {
-      throw create$2('Unexpected case')
-    };
+    /* istanbul ignore next */
+    const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
+
+    doc.ELEMENT_NODE;
+    doc.TEXT_NODE;
+    doc.CDATA_SECTION_NODE;
+    doc.COMMENT_NODE;
+    doc.DOCUMENT_NODE;
+    doc.DOCUMENT_TYPE_NODE;
+    doc.DOCUMENT_FRAGMENT_NODE;
 
     /**
      * Utility functions for working with EcmaScript objects.
@@ -45850,101 +51951,34 @@ var app = (function () {
     };
 
     /**
-     * Utility module to work with EcmaScript Symbols.
-     *
-     * @module symbol
-     */
-
-    /**
-     * Return fresh symbol.
-     *
-     * @return {Symbol}
-     */
-    const create$1 = Symbol;
-
-    /**
-     * Working with value pairs.
-     *
-     * @module pair
-     */
-
-    /**
-     * @template L,R
-     */
-    class Pair {
-      /**
-       * @param {L} left
-       * @param {R} right
-       */
-      constructor (left, right) {
-        this.left = left;
-        this.right = right;
-      }
-    }
-
-    /**
-     * @template L,R
-     * @param {L} left
-     * @param {R} right
-     * @return {Pair<L,R>}
-     */
-    const create = (left, right) => new Pair(left, right);
-
-    /* eslint-env browser */
-
-    /* istanbul ignore next */
-    /**
-     * @type {Document}
-     */
-    const doc = /** @type {Document} */ (typeof document !== 'undefined' ? document : {});
-
-    /* istanbul ignore next */
-    /** @type {DOMParser} */ (typeof DOMParser !== 'undefined' ? new DOMParser() : null);
-
-    /**
-     * @param {Map<string,string>} m
-     * @return {string}
-     */
-    /* istanbul ignore next */
-    const mapToStyleString = m => map(m, (value, key) => `${key}:${value};`).join('');
-
-    doc.ELEMENT_NODE;
-    doc.TEXT_NODE;
-    doc.CDATA_SECTION_NODE;
-    doc.COMMENT_NODE;
-    doc.DOCUMENT_NODE;
-    doc.DOCUMENT_TYPE_NODE;
-    doc.DOCUMENT_FRAGMENT_NODE;
-
-    /**
      * Isomorphic logging module with support for colors!
      *
      * @module logging
      */
 
-    const BOLD = create$1();
-    const UNBOLD = create$1();
-    const BLUE = create$1();
-    const GREY = create$1();
-    const GREEN = create$1();
-    const RED = create$1();
-    const PURPLE = create$1();
-    const ORANGE = create$1();
-    const UNCOLOR = create$1();
+    const BOLD = create$2();
+    const UNBOLD = create$2();
+    const BLUE = create$2();
+    const GREY = create$2();
+    const GREEN = create$2();
+    const RED = create$2();
+    const PURPLE = create$2();
+    const ORANGE = create$2();
+    const UNCOLOR = create$2();
 
     /**
      * @type {Object<Symbol,pair.Pair<string,string>>}
      */
     const _browserStyleMap = {
-      [BOLD]: create('font-weight', 'bold'),
-      [UNBOLD]: create('font-weight', 'normal'),
-      [BLUE]: create('color', 'blue'),
-      [GREEN]: create('color', 'green'),
-      [GREY]: create('color', 'grey'),
-      [RED]: create('color', 'red'),
-      [PURPLE]: create('color', 'purple'),
-      [ORANGE]: create('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
-      [UNCOLOR]: create('color', 'black')
+      [BOLD]: create$1('font-weight', 'bold'),
+      [UNBOLD]: create$1('font-weight', 'normal'),
+      [BLUE]: create$1('color', 'blue'),
+      [GREEN]: create$1('color', 'green'),
+      [GREY]: create$1('color', 'grey'),
+      [RED]: create$1('color', 'red'),
+      [PURPLE]: create$1('color', 'purple'),
+      [ORANGE]: create$1('color', 'orange'), // not well supported in chrome when debugging node with inspector - TODO: deprecate
+      [UNCOLOR]: create$1('color', 'black')
     };
 
     const _nodeStyleMap = {
@@ -46086,6 +52120,167 @@ var app = (function () {
         const timeDiff = timeNow - lastLoggingTime;
         lastLoggingTime = timeNow;
         print(color, moduleName, UNCOLOR, ...args.map(arg => (typeof arg === 'string' || typeof arg === 'symbol') ? arg : JSON.stringify(arg)), color, ' +' + timeDiff + 'ms');
+      }
+    };
+
+    /**
+     * Utility helpers to work with promises.
+     *
+     * @module promise
+     */
+
+    /**
+     * @template T
+     * @callback PromiseResolve
+     * @param {T|PromiseLike<T>} [result]
+     */
+
+    /**
+     * @template T
+     * @param {function(PromiseResolve<T>,function(Error):void):any} f
+     * @return {Promise<T>}
+     */
+    const create = f => /** @type {Promise<T>} */ (new Promise(f));
+
+    /**
+     * @param {Error} [reason]
+     * @return {Promise<never>}
+     */
+    const reject = reason => Promise.reject(reason);
+
+    /**
+     * @template T
+     * @param {T|void} res
+     * @return {Promise<T|void>}
+     */
+    const resolve = res => Promise.resolve(res);
+
+    /* eslint-env browser */
+
+    /**
+     * @typedef {Object} Channel
+     * @property {Set<Function>} Channel.subs
+     * @property {any} Channel.bc
+     */
+
+    /**
+     * @type {Map<string, Channel>}
+     */
+    const channels = new Map();
+
+    class LocalStoragePolyfill {
+      /**
+       * @param {string} room
+       */
+      constructor (room) {
+        this.room = room;
+        /**
+         * @type {null|function({data:ArrayBuffer}):void}
+         */
+        this.onmessage = null;
+        onChange(e => e.key === room && this.onmessage !== null && this.onmessage({ data: fromBase64(e.newValue || '') }));
+      }
+
+      /**
+       * @param {ArrayBuffer} buf
+       */
+      postMessage (buf) {
+        varStorage.setItem(this.room, toBase64(createUint8ArrayFromArrayBuffer(buf)));
+      }
+    }
+
+    // Use BroadcastChannel or Polyfill
+    const BC = typeof BroadcastChannel === 'undefined' ? LocalStoragePolyfill : BroadcastChannel;
+
+    /**
+     * @param {string} room
+     * @return {Channel}
+     */
+    const getChannel = room =>
+      setIfUndefined(channels, room, () => {
+        const subs = new Set();
+        const bc = new BC(room);
+        /**
+         * @param {{data:ArrayBuffer}} e
+         */
+        bc.onmessage = e => subs.forEach(sub => sub(e.data));
+        return {
+          bc, subs
+        }
+      });
+
+    /**
+     * Subscribe to global `publish` events.
+     *
+     * @function
+     * @param {string} room
+     * @param {function(any):any} f
+     */
+    const subscribe = (room, f) => getChannel(room).subs.add(f);
+
+    /**
+     * Unsubscribe from `publish` global events.
+     *
+     * @function
+     * @param {string} room
+     * @param {function(any):any} f
+     */
+    const unsubscribe = (room, f) => getChannel(room).subs.delete(f);
+
+    /**
+     * Publish data to all subscribers (including subscribers on this tab)
+     *
+     * @function
+     * @param {string} room
+     * @param {any} data
+     */
+    const publish = (room, data) => {
+      const c = getChannel(room);
+      c.bc.postMessage(data);
+      c.subs.forEach(sub => sub(data));
+    };
+
+    /**
+     * Mutual exclude for JavaScript.
+     *
+     * @module mutex
+     */
+
+    /**
+     * @callback mutex
+     * @param {function():void} cb Only executed when this mutex is not in the current stack
+     * @param {function():void} [elseCb] Executed when this mutex is in the current stack
+     */
+
+    /**
+     * Creates a mutual exclude function with the following property:
+     *
+     * ```js
+     * const mutex = createMutex()
+     * mutex(() => {
+     *   // This function is immediately executed
+     *   mutex(() => {
+     *     // This function is not executed, as the mutex is already active.
+     *   })
+     * })
+     * ```
+     *
+     * @return {mutex} A mutual exclude function
+     * @public
+     */
+    const createMutex = () => {
+      let token = true;
+      return (f, g) => {
+        if (token) {
+          token = false;
+          try {
+            f();
+          } finally {
+            token = true;
+          }
+        } else if (g !== undefined) {
+          g();
+        }
       }
     };
 
@@ -46523,7 +52718,7 @@ var app = (function () {
         this.autoLoad = autoLoad;
         this.meta = meta;
         this.isLoaded = false;
-        this.whenLoaded = create$3(resolve => {
+        this.whenLoaded = create(resolve => {
           this.on('load', () => {
             this.isLoaded = true;
             resolve(this);
@@ -51037,7 +57232,7 @@ var app = (function () {
       packJsonContent();
     };
 
-    const lengthExceeded = create$2('Length exceeded!');
+    const lengthExceeded = create$3('Length exceeded!');
 
     /**
      * @param {Transaction} transaction
@@ -53262,7 +59457,7 @@ var app = (function () {
           const pc = /** @type {Array<any>} */ (this._prelimContent);
           const index = ref === null ? 0 : pc.findIndex(el => el === ref) + 1;
           if (index === 0 && ref !== null) {
-            throw create$2('Reference item not found')
+            throw create$3('Reference item not found')
           }
           pc.splice(index, 0, ...content);
         }
@@ -55769,1503 +61964,6 @@ var app = (function () {
         typeMapGetSnapshot: typeMapGetSnapshot
     });
 
-    //import * as TWEEN from "@tweenjs/tween.js"
-    class Pacman extends AbstractType {
-        constructor(id, name, peerId, position) {
-            super();
-            this.deletedFlag = 0;
-            // Create spheres with decreasingly small horizontal sweeps, in order
-            // to create pacman "death" animation.
-            let pacmanGeometries = new Array();
-            let numFrames = 40;
-            for (let i = 0; i < numFrames; i++) {
-                let offset = (i / (numFrames - 1)) * Math.PI;
-                pacmanGeometries.push(new SphereGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2));
-                pacmanGeometries[i].rotateX(Math.PI / 2);
-            }
-            let pacmanMaterial = Pacman.PACMAN_ONLINE_MATERIAL;
-            this.mesh = new Mesh(pacmanGeometries[0], pacmanMaterial);
-            this.frames = pacmanGeometries;
-            this.distanceMoved = 0;
-            this.lastDistanceMoved = 0;
-            // Initialize pacman facing to the left.
-            this.mesh.position.copy(position);
-            this.direction = new Vector3(-1, 0, 0);
-            this.id = id;
-            this.name = name;
-            this.isPlaying = false;
-            this.isOnline = true;
-            this.peerId = peerId;
-            this.frameCounter = 0;
-            this.isMoving = false;
-        }
-        // Update pacman mesh simulating the eat movement
-        updateFrame() {
-            // Show eating animation based on how much pacman has moved.
-            let maxAngle = Math.PI / 4;
-            let angle = (this.distanceMoved * 2) % (maxAngle * 2);
-            if (angle > maxAngle)
-                angle = maxAngle * 2 - angle;
-            let frame = Math.floor(angle / Math.PI * this.frames.length);
-            this.mesh.geometry = this.frames[frame];
-            // Update rotation based on direction so that mouth is always facing forward.
-            // The "mouth" part is on the side of the sphere, make it "look" up but
-            // set the up direction so that it points forward.
-            this.mesh.up.copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2);
-            this.mesh.lookAt((new Vector3()).copy(this.mesh.position).add(Utils.UP));
-            if (!this.isOnline) {
-                this.mesh.material = Pacman.PACMAN_OFFLINE_MATERIAL;
-            }
-        }
-        // Used to predict movement of other players to avoid glitch due to poor connection
-        calculateFakeMovement(delta) {
-            if (this.isMoving && this.lastDistanceMoved == this.distanceMoved) {
-                console.log("calc fake");
-                this.mesh.translateOnAxis(this.direction, Pacman.PACMAN_SPEED * delta);
-                this.distanceMoved += Pacman.PACMAN_SPEED * delta;
-            }
-            this.lastDistanceMoved = this.distanceMoved;
-        }
-        // Elaborate key pressed and change pacman position
-        movePacman(delta, keys, levelMap, state) {
-            this.isMoving = false;
-            // Move based on current keys being pressed.
-            if (keys.getKeyState('KeyW') || keys.getKeyState('ArrowUp')) {
-                // W - move forward
-                //pacman.translateOnAxis(pacman.direction, PACMAN_SPEED * delta)
-                // Because we are rotating the object above using lookAt, "forward" is to the left.
-                this.mesh.translateOnAxis(Utils.LEFT, Pacman.PACMAN_SPEED * delta);
-                this.distanceMoved += Pacman.PACMAN_SPEED * delta;
-                this.isMoving = true;
-            }
-            if (keys.getKeyState('KeyA') || keys.getKeyState('ArrowLeft')) {
-                // A - rotate left
-                this.direction.applyAxisAngle(Utils.UP, Math.PI / 2 * delta);
-            }
-            if (keys.getKeyState('KeyD') || keys.getKeyState('ArrowRight')) {
-                // D - rotate right
-                this.direction.applyAxisAngle(Utils.UP, -Math.PI / 2 * delta);
-            }
-            if (keys.getKeyState('KeyS') || keys.getKeyState('ArrowDown')) {
-                // S - move backward
-                this.mesh.translateOnAxis(Utils.LEFT, -Pacman.PACMAN_SPEED * delta);
-                this.distanceMoved += Pacman.PACMAN_SPEED * delta;
-                this.isMoving = true;
-            }
-            // Check for collision with walls
-            let leftSide = this.mesh.position.clone().addScaledVector(Utils.LEFT, Pacman.PACMAN_RADIUS).round();
-            let topSide = this.mesh.position.clone().addScaledVector(Utils.TOP, Pacman.PACMAN_RADIUS).round();
-            let rightSide = this.mesh.position.clone().addScaledVector(Utils.RIGHT, Pacman.PACMAN_RADIUS).round();
-            let bottomSide = this.mesh.position.clone().addScaledVector(Utils.BOTTOM, Pacman.PACMAN_RADIUS).round();
-            if (levelMap.isWall(leftSide)) {
-                this.mesh.position.x = leftSide.x + 0.5 + Pacman.PACMAN_RADIUS;
-            }
-            if (levelMap.isWall(rightSide)) {
-                this.mesh.position.x = rightSide.x - 0.5 - Pacman.PACMAN_RADIUS;
-            }
-            if (levelMap.isWall(topSide)) {
-                this.mesh.position.y = topSide.y - 0.5 - Pacman.PACMAN_RADIUS;
-            }
-            if (levelMap.isWall(bottomSide)) {
-                this.mesh.position.y = bottomSide.y + 0.5 + Pacman.PACMAN_RADIUS;
-            }
-            let cell = levelMap.getAt(this.mesh.position);
-            // Make pacman eat dots.
-            /*if (cell && cell.isDot === true && cell.visible === true) {
-                levelMap.removeAt(this.mesh.position)
-                //this.numDotsEaten += 1
-            }*/
-            let x = Math.round(this.mesh.position.x), y = Math.round(this.mesh.position.y);
-            let dot = state.getDot(x, y);
-            if (dot != null) {
-                dot.pacmanId = this.id;
-                state.updateDotShared(dot);
-            }
-            // Make pacman eat power pellets.
-            //this.atePellet = false
-            if (cell && cell.isPowerPellet === true && cell.visible === true) {
-                levelMap.removeAt(this.mesh.position);
-                //this.atePellet = true
-                //killSound.play()
-            }
-        }
-        // Get pacman position
-        getPosition() {
-            return this.mesh.position;
-        }
-        // Add mesh to 3d scene
-        addToScene(scene) {
-            scene.add(this.mesh);
-        }
-        // Get plain js object
-        toPlainObj() {
-            let obj = {};
-            obj["id"] = this.id;
-            obj["name"] = this.name;
-            obj["peerId"] = this.peerId;
-            obj["position"] = [this.mesh.position.x, this.mesh.position.y, this.mesh.position.z];
-            obj["direction"] = [this.direction.x, this.direction.y, this.direction.z];
-            obj["distanceMoved"] = this.distanceMoved;
-            obj["isMoving"] = this.isMoving;
-            obj["isPlaying"] = this.isPlaying;
-            obj["isOnline"] = this.isOnline;
-            return obj;
-        }
-        // New pacman from plain js object
-        static fromObj(obj) {
-            let position = new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]);
-            let out = new Pacman(obj["id"], obj["name"], obj["peerId"], position);
-            out.copyObj(obj);
-            return out;
-        }
-        // Copy from a js plain object
-        copyObj(obj) {
-            this.mesh.position.copy(new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]));
-            this.direction.copy(new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]));
-            this.distanceMoved = obj["distanceMoved"];
-            this.isMoving = obj["isMoving"];
-            this.isPlaying = obj["isPlaying"];
-            this.isOnline = obj["isOnline"];
-        }
-        // Copy object if it has the same id
-        copyObjIfSameId(obj) {
-            if (obj["id"] == this.id) {
-                this.copyObj(obj);
-                return true;
-            }
-            return false;
-        }
-    }
-    Pacman.PACMAN_SPEED = 2;
-    Pacman.PACMAN_RADIUS = 0.4;
-    Pacman.PACMAN_ONLINE_MATERIAL = new MeshPhongMaterial({ color: 'yellow', side: DoubleSide });
-    Pacman.PACMAN_OFFLINE_MATERIAL = new MeshPhongMaterial({ color: 'gray', side: DoubleSide });
-
-    class Game {
-        createRenderer() {
-            let renderer = new WebGLRenderer({ antialias: true });
-            renderer.setClearColor('black', 1.0);
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            document.body.appendChild(renderer.domElement);
-            return renderer;
-        }
-        createScene() {
-            let scene = new Scene();
-            // Add lighting
-            scene.add(new AmbientLight(0x888888));
-            let light = new SpotLight('white', 0.5);
-            light.position.set(0, 0, 50);
-            scene.add(light);
-            return scene;
-        }
-        createHudCamera(map) {
-            let halfWidth = (map.right - map.left) / 2, halfHeight = (map.top - map.bottom) / 2;
-            let hudCamera = new OrthographicCamera(-halfWidth, halfWidth, halfHeight, -halfHeight, 1, 100);
-            hudCamera.position.copy(new Vector3(map.centerX, map.centerY, 10));
-            hudCamera.lookAt(new Vector3(map.centerX, map.centerY, 0));
-            return hudCamera;
-        }
-        renderHud(renderer, hudCamera, scene) {
-            // Increase size of pacman and dots in HUD to make them easier to see.
-            scene.children.forEach(function (object) {
-                if (object.isWall !== true)
-                    object.scale.set(2.5, 2.5, 2.5);
-            });
-            // Only render in the bottom left 200x200 square of the screen.
-            renderer.enableScissorTest(true);
-            renderer.setScissor(10, 10, 200, 200);
-            renderer.setViewport(10, 10, 200, 200);
-            renderer.render(scene, hudCamera);
-            renderer.enableScissorTest(false);
-            // Reset scales after rendering HUD.
-            scene.children.forEach(function (object) {
-                object.scale.set(1, 1, 1);
-            });
-        }
-        createGhost(scene, position) {
-            let ghostGeometry = new SphereGeometry(Game.GHOST_RADIUS, 16, 16);
-            // Give each ghost it's own material so we can change the colors of individual ghosts.
-            let ghostMaterial = new MeshPhongMaterial({ color: 'red' });
-            let ghost = new Mesh(ghostGeometry, ghostMaterial);
-            ghost.isGhost = true;
-            ghost.isWrapper = true;
-            ghost.isAfraid = false;
-            // Ghosts start moving left.
-            ghost.position.copy(position);
-            ghost.direction = new Vector3(-1, 0, 0);
-            scene.add(ghost);
-        }
-        // Make object wrap to other side of map if it goes out of bounds.
-        wrapObject(object, map) {
-            if (object.position.x < map.left)
-                object.position.x = map.right;
-            else if (object.position.x > map.right)
-                object.position.x = map.left;
-            if (object.position.y > map.top)
-                object.position.y = map.bottom;
-            else if (object.position.y < map.bottom)
-                object.position.y = map.top;
-        }
-        // Generic functions
-        // =================
-        distance(object1, object2) {
-            let difference = new Vector3();
-            // Calculate difference between objects' positions.
-            difference.copy(object1.position).sub(object2.position);
-            return difference.length();
-        }
-        gameLoop(callback) {
-            let previousFrameTime = window.performance.now();
-            // How many seconds the animation has progressed in total.
-            let animationSeconds = 0;
-            let render = function () {
-                let now = window.performance.now();
-                let animationDelta = (now - previousFrameTime) / 1000;
-                previousFrameTime = now;
-                // requestAnimationFrame will not call the callback if the browser
-                // isn't visible, so if the browser has lost focus for a while the
-                // time since the last frame might be very large. This could cause
-                // strange behavior (such as objects teleporting through walls in
-                // one frame when they would normally move slowly toward the wall
-                // over several frames), so make sure that the delta is never too
-                // large.
-                animationDelta = Math.min(animationDelta, 1 / 30);
-                // Keep track of how many seconds of animation has passed.
-                animationSeconds += animationDelta;
-                callback(animationDelta, animationSeconds);
-                requestAnimationFrame(render);
-            };
-            requestAnimationFrame(render);
-        }
-    }
-    // Constants
-    // =========
-    Game.GHOST_SPEED = 1.5;
-    Game.GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.25;
-
-    class KeyState {
-        constructor() {
-            // Keep track of current keys being pressed.
-            this.state = new Map();
-            let self = this;
-            document.body.addEventListener('keydown', function (event) {
-                self.state.set(event.code, true);
-            });
-            document.body.addEventListener('keyup', function (event) {
-                self.state.set(event.code, false);
-            });
-            document.body.addEventListener('blur', function (_) {
-                // Make it so that all keys are unpressed when the browser loses focus.
-                for (let key in self.state.keys()) {
-                    if (self.state.has(key))
-                        self.state.set(key, false);
-                }
-            });
-        }
-        getKeyState(key) {
-            if (this.state.has(key))
-                return this.state.get(key);
-            return false;
-        }
-    }
-
-    class Dot {
-        constructor(id, position, isPowerDot = false) {
-            this.isPowerDot = isPowerDot;
-            let dotGeometry = isPowerDot ? new SphereGeometry(Dot.DOT_RADIUS_POWER) : new SphereGeometry(Dot.DOT_RADIUS);
-            let dotMaterial = new MeshPhongMaterial({ color: 0xFFDAB9 }); // Paech color
-            this.mesh = new Mesh(dotGeometry, dotMaterial);
-            this.mesh.position.copy(position);
-            this.id = id;
-            this.pacmanId = null;
-        }
-        setVisible(value) {
-            this.mesh.visible = value;
-        }
-        getPosition() {
-            return this.mesh.position;
-        }
-        isVisible() {
-            return this.pacmanId == null;
-        }
-        addToScene(scene) {
-            scene.add(this.mesh);
-        }
-    }
-    Dot.DOT_RADIUS = 0.1;
-    Dot.DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2;
-
-    /**
-     * Description: A THREE loader for STL ASCII files, as created by Solidworks and other CAD programs.
-     *
-     * Supports both binary and ASCII encoded files, with automatic detection of type.
-     *
-     * The loader returns a non-indexed buffer geometry.
-     *
-     * Limitations:
-     *  Binary decoding supports "Magics" color format (http://en.wikipedia.org/wiki/STL_(file_format)#Color_in_binary_STL).
-     *  There is perhaps some question as to how valid it is to always assume little-endian-ness.
-     *  ASCII decoding assumes file is UTF-8.
-     *
-     * Usage:
-     *  const loader = new STLLoader();
-     *  loader.load( './models/stl/slotted_disk.stl', function ( geometry ) {
-     *    scene.add( new THREE.Mesh( geometry ) );
-     *  });
-     *
-     * For binary STLs geometry might contain colors for vertices. To use it:
-     *  // use the same code to load STL as above
-     *  if (geometry.hasColors) {
-     *    material = new THREE.MeshPhongMaterial({ opacity: geometry.alpha, vertexColors: true });
-     *  } else { .... }
-     *  const mesh = new THREE.Mesh( geometry, material );
-     *
-     * For ASCII STLs containing multiple solids, each solid is assigned to a different group.
-     * Groups can be used to assign a different color by defining an array of materials with the same length of
-     * geometry.groups and passing it to the Mesh constructor:
-     *
-     * const mesh = new THREE.Mesh( geometry, material );
-     *
-     * For example:
-     *
-     *  const materials = [];
-     *  const nGeometryGroups = geometry.groups.length;
-     *
-     *  const colorMap = ...; // Some logic to index colors.
-     *
-     *  for (let i = 0; i < nGeometryGroups; i++) {
-     *
-     *		const material = new THREE.MeshPhongMaterial({
-     *			color: colorMap[i],
-     *			wireframe: false
-     *		});
-     *
-     *  }
-     *
-     *  materials.push(material);
-     *  const mesh = new THREE.Mesh(geometry, materials);
-     */
-
-
-    class STLLoader extends Loader {
-
-    	constructor( manager ) {
-
-    		super( manager );
-
-    	}
-
-    	load( url, onLoad, onProgress, onError ) {
-
-    		const scope = this;
-
-    		const loader = new FileLoader( this.manager );
-    		loader.setPath( this.path );
-    		loader.setResponseType( 'arraybuffer' );
-    		loader.setRequestHeader( this.requestHeader );
-    		loader.setWithCredentials( this.withCredentials );
-
-    		loader.load( url, function ( text ) {
-
-    			try {
-
-    				onLoad( scope.parse( text ) );
-
-    			} catch ( e ) {
-
-    				if ( onError ) {
-
-    					onError( e );
-
-    				} else {
-
-    					console.error( e );
-
-    				}
-
-    				scope.manager.itemError( url );
-
-    			}
-
-    		}, onProgress, onError );
-
-    	}
-
-    	parse( data ) {
-
-    		function isBinary( data ) {
-
-    			const reader = new DataView( data );
-    			const face_size = ( 32 / 8 * 3 ) + ( ( 32 / 8 * 3 ) * 3 ) + ( 16 / 8 );
-    			const n_faces = reader.getUint32( 80, true );
-    			const expect = 80 + ( 32 / 8 ) + ( n_faces * face_size );
-
-    			if ( expect === reader.byteLength ) {
-
-    				return true;
-
-    			}
-
-    			// An ASCII STL data must begin with 'solid ' as the first six bytes.
-    			// However, ASCII STLs lacking the SPACE after the 'd' are known to be
-    			// plentiful.  So, check the first 5 bytes for 'solid'.
-
-    			// Several encodings, such as UTF-8, precede the text with up to 5 bytes:
-    			// https://en.wikipedia.org/wiki/Byte_order_mark#Byte_order_marks_by_encoding
-    			// Search for "solid" to start anywhere after those prefixes.
-
-    			// US-ASCII ordinal values for 's', 'o', 'l', 'i', 'd'
-
-    			const solid = [ 115, 111, 108, 105, 100 ];
-
-    			for ( let off = 0; off < 5; off ++ ) {
-
-    				// If "solid" text is matched to the current offset, declare it to be an ASCII STL.
-
-    				if ( matchDataViewAt( solid, reader, off ) ) return false;
-
-    			}
-
-    			// Couldn't find "solid" text at the beginning; it is binary STL.
-
-    			return true;
-
-    		}
-
-    		function matchDataViewAt( query, reader, offset ) {
-
-    			// Check if each byte in query matches the corresponding byte from the current offset
-
-    			for ( let i = 0, il = query.length; i < il; i ++ ) {
-
-    				if ( query[ i ] !== reader.getUint8( offset + i, false ) ) return false;
-
-    			}
-
-    			return true;
-
-    		}
-
-    		function parseBinary( data ) {
-
-    			const reader = new DataView( data );
-    			const faces = reader.getUint32( 80, true );
-
-    			let r, g, b, hasColors = false, colors;
-    			let defaultR, defaultG, defaultB, alpha;
-
-    			// process STL header
-    			// check for default color in header ("COLOR=rgba" sequence).
-
-    			for ( let index = 0; index < 80 - 10; index ++ ) {
-
-    				if ( ( reader.getUint32( index, false ) == 0x434F4C4F /*COLO*/ ) &&
-    					( reader.getUint8( index + 4 ) == 0x52 /*'R'*/ ) &&
-    					( reader.getUint8( index + 5 ) == 0x3D /*'='*/ ) ) {
-
-    					hasColors = true;
-    					colors = new Float32Array( faces * 3 * 3 );
-
-    					defaultR = reader.getUint8( index + 6 ) / 255;
-    					defaultG = reader.getUint8( index + 7 ) / 255;
-    					defaultB = reader.getUint8( index + 8 ) / 255;
-    					alpha = reader.getUint8( index + 9 ) / 255;
-
-    				}
-
-    			}
-
-    			const dataOffset = 84;
-    			const faceLength = 12 * 4 + 2;
-
-    			const geometry = new BufferGeometry();
-
-    			const vertices = new Float32Array( faces * 3 * 3 );
-    			const normals = new Float32Array( faces * 3 * 3 );
-
-    			for ( let face = 0; face < faces; face ++ ) {
-
-    				const start = dataOffset + face * faceLength;
-    				const normalX = reader.getFloat32( start, true );
-    				const normalY = reader.getFloat32( start + 4, true );
-    				const normalZ = reader.getFloat32( start + 8, true );
-
-    				if ( hasColors ) {
-
-    					const packedColor = reader.getUint16( start + 48, true );
-
-    					if ( ( packedColor & 0x8000 ) === 0 ) {
-
-    						// facet has its own unique color
-
-    						r = ( packedColor & 0x1F ) / 31;
-    						g = ( ( packedColor >> 5 ) & 0x1F ) / 31;
-    						b = ( ( packedColor >> 10 ) & 0x1F ) / 31;
-
-    					} else {
-
-    						r = defaultR;
-    						g = defaultG;
-    						b = defaultB;
-
-    					}
-
-    				}
-
-    				for ( let i = 1; i <= 3; i ++ ) {
-
-    					const vertexstart = start + i * 12;
-    					const componentIdx = ( face * 3 * 3 ) + ( ( i - 1 ) * 3 );
-
-    					vertices[ componentIdx ] = reader.getFloat32( vertexstart, true );
-    					vertices[ componentIdx + 1 ] = reader.getFloat32( vertexstart + 4, true );
-    					vertices[ componentIdx + 2 ] = reader.getFloat32( vertexstart + 8, true );
-
-    					normals[ componentIdx ] = normalX;
-    					normals[ componentIdx + 1 ] = normalY;
-    					normals[ componentIdx + 2 ] = normalZ;
-
-    					if ( hasColors ) {
-
-    						colors[ componentIdx ] = r;
-    						colors[ componentIdx + 1 ] = g;
-    						colors[ componentIdx + 2 ] = b;
-
-    					}
-
-    				}
-
-    			}
-
-    			geometry.setAttribute( 'position', new BufferAttribute( vertices, 3 ) );
-    			geometry.setAttribute( 'normal', new BufferAttribute( normals, 3 ) );
-
-    			if ( hasColors ) {
-
-    				geometry.setAttribute( 'color', new BufferAttribute( colors, 3 ) );
-    				geometry.hasColors = true;
-    				geometry.alpha = alpha;
-
-    			}
-
-    			return geometry;
-
-    		}
-
-    		function parseASCII( data ) {
-
-    			const geometry = new BufferGeometry();
-    			const patternSolid = /solid([\s\S]*?)endsolid/g;
-    			const patternFace = /facet([\s\S]*?)endfacet/g;
-    			let faceCounter = 0;
-
-    			const patternFloat = /[\s]+([+-]?(?:\d*)(?:\.\d*)?(?:[eE][+-]?\d+)?)/.source;
-    			const patternVertex = new RegExp( 'vertex' + patternFloat + patternFloat + patternFloat, 'g' );
-    			const patternNormal = new RegExp( 'normal' + patternFloat + patternFloat + patternFloat, 'g' );
-
-    			const vertices = [];
-    			const normals = [];
-
-    			const normal = new Vector3();
-
-    			let result;
-
-    			let groupCount = 0;
-    			let startVertex = 0;
-    			let endVertex = 0;
-
-    			while ( ( result = patternSolid.exec( data ) ) !== null ) {
-
-    				startVertex = endVertex;
-
-    				const solid = result[ 0 ];
-
-    				while ( ( result = patternFace.exec( solid ) ) !== null ) {
-
-    					let vertexCountPerFace = 0;
-    					let normalCountPerFace = 0;
-
-    					const text = result[ 0 ];
-
-    					while ( ( result = patternNormal.exec( text ) ) !== null ) {
-
-    						normal.x = parseFloat( result[ 1 ] );
-    						normal.y = parseFloat( result[ 2 ] );
-    						normal.z = parseFloat( result[ 3 ] );
-    						normalCountPerFace ++;
-
-    					}
-
-    					while ( ( result = patternVertex.exec( text ) ) !== null ) {
-
-    						vertices.push( parseFloat( result[ 1 ] ), parseFloat( result[ 2 ] ), parseFloat( result[ 3 ] ) );
-    						normals.push( normal.x, normal.y, normal.z );
-    						vertexCountPerFace ++;
-    						endVertex ++;
-
-    					}
-
-    					// every face have to own ONE valid normal
-
-    					if ( normalCountPerFace !== 1 ) {
-
-    						console.error( 'THREE.STLLoader: Something isn\'t right with the normal of face number ' + faceCounter );
-
-    					}
-
-    					// each face have to own THREE valid vertices
-
-    					if ( vertexCountPerFace !== 3 ) {
-
-    						console.error( 'THREE.STLLoader: Something isn\'t right with the vertices of face number ' + faceCounter );
-
-    					}
-
-    					faceCounter ++;
-
-    				}
-
-    				const start = startVertex;
-    				const count = endVertex - startVertex;
-
-    				geometry.addGroup( start, count, groupCount );
-    				groupCount ++;
-
-    			}
-
-    			geometry.setAttribute( 'position', new Float32BufferAttribute( vertices, 3 ) );
-    			geometry.setAttribute( 'normal', new Float32BufferAttribute( normals, 3 ) );
-
-    			return geometry;
-
-    		}
-
-    		function ensureString( buffer ) {
-
-    			if ( typeof buffer !== 'string' ) {
-
-    				return LoaderUtils.decodeText( new Uint8Array( buffer ) );
-
-    			}
-
-    			return buffer;
-
-    		}
-
-    		function ensureBinary( buffer ) {
-
-    			if ( typeof buffer === 'string' ) {
-
-    				const array_buffer = new Uint8Array( buffer.length );
-    				for ( let i = 0; i < buffer.length; i ++ ) {
-
-    					array_buffer[ i ] = buffer.charCodeAt( i ) & 0xff; // implicitly assumes little-endian
-
-    				}
-
-    				return array_buffer.buffer || array_buffer;
-
-    			} else {
-
-    				return buffer;
-
-    			}
-
-    		}
-
-    		// start
-
-    		const binData = ensureBinary( data );
-
-    		return isBinary( binData ) ? parseBinary( binData ) : parseASCII( ensureString( data ) );
-
-    	}
-
-    }
-
-    class Ghost {
-        constructor(id, position, afterLoading = () => { }) {
-            if (Ghost.loadedGeometry == null) {
-                let stlLoader = new STLLoader();
-                let self = this;
-                stlLoader.load('misc/ghost.stl', (geometry) => {
-                    Ghost.loadedGeometry = geometry;
-                    self.makeMesh(position);
-                    afterLoading();
-                }, (xhr) => {
-                    console.log((xhr.loaded / xhr.total) * 100 + '% loaded');
-                }, (error) => {
-                    console.log(error);
-                });
-            }
-            else {
-                this.makeMesh(position);
-                afterLoading();
-            }
-            this.id = id;
-        }
-        // Make 3d mesh
-        makeMesh(position) {
-            let dotMaterial = new MeshPhongMaterial({ color: 'red', side: DoubleSide });
-            dotMaterial.flatShading = false;
-            this.mesh = new Mesh(Ghost.loadedGeometry, dotMaterial);
-            this.mesh.geometry.computeVertexNormals();
-            this.mesh.position.set(position.x, position.y, position.z + Ghost.Z_OFFSET);
-            this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE);
-        }
-        // Set visible property
-        setVisible(value) {
-            this.mesh.visible = value;
-        }
-        // Get ghost position
-        getPosition() {
-            return this.mesh.position;
-        }
-        // Add ghost mesh to 3d scene
-        addToScene(scene) {
-            scene.add(this.mesh);
-        }
-        // Update ghost position based on current state
-        updateGhost() {
-        }
-        // Get plain js object
-        toPlainObj() {
-            let obj = {};
-            obj["id"] = this.id;
-            obj["position"] = [this.mesh.position.x, this.mesh.position.y, this.mesh.position.z];
-            return obj;
-        }
-        // New pacman from plain js object
-        static fromObj(obj) {
-            let position = new Vector3(obj["position"][0], obj["position"][1], obj["position"][2]);
-            new Vector3(obj["direction"][0], obj["direction"][1], obj["direction"][2]);
-            let out = new Ghost(obj["id"], position);
-            return out;
-        }
-    }
-    Ghost.GHOST_SCALE = 0.162;
-    Ghost.Z_OFFSET = -0.2;
-
-    class LevelMap {
-        constructor(scene, state) {
-            let dotId = 0;
-            let ghostId = 0;
-            this.bottom = -(LevelMap.LEVEL.length - 1);
-            this.top = this.left = this.right = 0;
-            this.numDots = 0;
-            this.pacmanSpawn = null;
-            this.ghostSpawn = null;
-            this.map = {};
-            let x, y;
-            for (let row = 0; row < LevelMap.LEVEL.length; row++) {
-                // Set the coordinates of the map so that they match the
-                // coordinate system for objects.
-                y = -row;
-                this.map[y] = {};
-                // Get the length of the longest row in the level definition.
-                let length = Math.floor(LevelMap.LEVEL[row].length / 2);
-                //map.right = Math.max(map.right, length - 1)
-                this.right = Math.max(this.right, length);
-                // Skip every second element, which is just a space for readability.
-                for (let column = 0; column < LevelMap.LEVEL[row].length; column += 2) {
-                    x = Math.floor(column / 2);
-                    let cell = LevelMap.LEVEL[row][column];
-                    let object = null;
-                    if (cell === '#') {
-                        object = this.createWall();
-                    }
-                    else if (cell === '.') {
-                        // Add dot to global shared state
-                        let dot = new Dot(dotId.toString(), new Vector3(x, y, 0));
-                        state.initDot(dot);
-                        dot.addToScene(scene);
-                        dotId++;
-                    }
-                    else if (cell === 'o') {
-                        let dot = new Dot(dotId.toString(), new Vector3(x, y, 0), true);
-                        state.initDot(dot);
-                        dot.addToScene(scene);
-                        dotId++;
-                    }
-                    else if (cell === 'P') {
-                        this.pacmanSpawn = new Vector3(x, y, 0);
-                    }
-                    else if (cell === 'G') {
-                        let ghost = new Ghost(ghostId.toString(), new Vector3(x, y, 0), () => {
-                            ghost.addToScene(scene);
-                        });
-                        ghostId++;
-                        this.ghostSpawn = new Vector3(x, y, 0);
-                    }
-                    if (object !== null) {
-                        object.position.set(x, y, 0);
-                        this.map[y][x] = object;
-                        scene.add(object);
-                    }
-                }
-            }
-            this.centerX = (this.left + this.right) / 2;
-            this.centerY = (this.bottom + this.top) / 2;
-        }
-        getAt(position) {
-            let x = Math.round(position.x), y = Math.round(position.y);
-            return this.map[y] && this.map[y][x];
-        }
-        isWall(position) {
-            let cell = this.getAt(position);
-            return cell && cell.isWall === true;
-        }
-        removeAt(position) {
-            let x = Math.round(position.x), y = Math.round(position.y);
-            if (this.map[y] && this.map[y][x]) {
-                // Don't actually remove, just make invisible.
-                this.map[y][x].visible = false;
-            }
-        }
-        createWall() {
-            let wallGeometry = new BoxGeometry(1, 1, 1);
-            let wallMaterial = new MeshLambertMaterial({ color: 'blue' });
-            let wall = new Mesh(wallGeometry, wallMaterial);
-            wall.isWall = true;
-            return wall;
-        }
-        createPowerPellet() {
-            let pelletGeometry = new SphereGeometry(LevelMap.PELLET_RADIUS, 12, 8);
-            let pelletMaterial = new MeshPhongMaterial({ color: 0xFFDAB9 }); // Paech color
-            let pellet = new Mesh(pelletGeometry, pelletMaterial);
-            pellet.isPowerPellet = true;
-            return pellet;
-        }
-    }
-    LevelMap.PELLET_RADIUS = Dot.DOT_RADIUS * 2;
-    LevelMap.LEVEL = [
-        '# # # # # # # # # # # # # # # # # # # # # # # # # # # #',
-        '# . . . . . . . . . . . . # # . . . . . . . . . . . . #',
-        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
-        '# o # # # # . # # # # # . # # . # # # # # . # # # # o #',
-        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
-        '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
-        '# . # # # # . # # . # # # # # # # # . # # . # # # # . #',
-        '# . # # # # . # # . # # # # # # # # . # # . # # # # . #',
-        '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
-        '# # # # # # . # # # # #   # #   # # # # # . # # # # # #',
-        '          # . # # # # #   # #   # # # # # . #          ',
-        '          # . # #         G           # # . #          ',
-        '          # . # #   # # # # # # # #   # # . #          ',
-        '# # # # # # . # #   #             #   # # . # # # # # #',
-        '            .       #             #       .            ',
-        '# # # # # # . # #   #             #   # # . # # # # # #',
-        '          # . # #   # # # # # # # #   # # . #          ',
-        '          # . # #                     # # . #          ',
-        '          # . # #   # # # # # # # #   # # . #          ',
-        '# # # # # # . # #   # # # # # # # #   # # . # # # # # #',
-        '# . . . . . . . . . . . . # # . . . . . . . . . . . . #',
-        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
-        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
-        '# o . . # # . . . G . . . P   . . . . . . . # # . . o #',
-        '# # # . # # . # # . # # # # # # # # . # # . # # . # # #',
-        '# # # . # # . # # . # # # # # # # # . # # . # # . # # #',
-        '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
-        '# . # # # # # # # # # # . # # . # # # # # # # # # # . #',
-        '# . # # # # # # # # # # . # # . # # # # # # # # # # . #',
-        '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
-        '# # # # # # # # # # # # # # # # # # # # # # # # # # # #'
-    ];
-
-    //import * as TWEEN from "@tweenjs/tween.js"
-    writable(new Array());
-    class GameState {
-        constructor(ydoc) {
-            this.pacmansShared = ydoc.getMap('pacmans');
-            this.pacmansLocal = new Map();
-            this.ghostsShared = ydoc.getMap('ghosts');
-            this.ghostsLocal = new Map();
-            this.dotsShared = ydoc.getMap('dots');
-            this.dotsMap = {};
-            this.pacmanDelIndex = 0;
-            this.currentPacman = null;
-        }
-        setCurrentPacman(currentPacman) {
-            this.currentPacman = currentPacman;
-        }
-        updatePacmanLocal(scene) {
-            this.pacmanDelIndex++;
-            this.pacmansShared.forEach((value, key) => {
-                let pLocal = this.pacmansLocal.get(key);
-                if (pLocal != null) {
-                    if (this.currentPacman && this.currentPacman.id != pLocal.id) {
-                        // Update pacman object
-                        pLocal.copyObjIfSameId(value);
-                        pLocal.deletedFlag = this.pacmanDelIndex;
-                    }
-                }
-                else {
-                    // Add new pacman object
-                    let pacman = Pacman.fromObj(value);
-                    pacman.deletedFlag = this.pacmanDelIndex;
-                    this.pacmansLocal.set(key, pacman);
-                    // Add pacman to scene
-                    pacman.addToScene(scene);
-                }
-            });
-            // Delete pacman on local and update store
-            for (let id in this.pacmansLocal) {
-                let local = this.pacmansLocal.get(id);
-                if (local[1] != this.pacmanDelIndex)
-                    this.pacmansLocal.delete(id);
-            }
-            //TWEEN.update();
-        }
-        setPacman(pacman) {
-            this.pacmansShared.set(pacman.id, pacman.toPlainObj());
-            this.pacmansLocal.set(pacman.id, pacman);
-        }
-        getPacmans() {
-            return this.pacmansLocal.values();
-        }
-        updateGhostsLocal() {
-        }
-        setGhost(ghost) {
-            this.ghostsShared.set(ghost.id, ghost.toPlainObj());
-            this.ghostsLocal.set(ghost.id, ghost);
-        }
-        getGhosts() {
-            return this.ghostsLocal.values();
-        }
-        updateDotsLocal() {
-            for (const y in this.dotsMap) {
-                for (const x in this.dotsMap[y]) {
-                    let dot = this.dotsMap[y][x];
-                    let pacmanId = this.dotsShared.get(dot.id);
-                    if (pacmanId) {
-                        dot.setVisible(false);
-                    }
-                    else {
-                        dot.setVisible(true);
-                    }
-                }
-            }
-        }
-        initDot(dot) {
-            // Add to map
-            let x = dot.getPosition().x;
-            let y = dot.getPosition().y;
-            if (!this.dotsMap.hasOwnProperty(y)) {
-                this.dotsMap[y] = {};
-            }
-            this.dotsMap[y][x] = dot;
-        }
-        // Update dot state
-        updateDotShared(dot) {
-            if (dot.pacmanId) {
-                this.dotsShared.set(dot.id, dot.pacmanId);
-            }
-        }
-        getDot(x, y) {
-            try {
-                return this.dotsMap[y][x];
-            }
-            catch (e) {
-                console.log(e);
-                return null;
-            }
-        }
-        checkIfAllPlaying() {
-            let out = true;
-            this.pacmansShared.forEach((value, key) => {
-                if (value["isPlaying"] == false)
-                    out = false;
-            });
-            return out;
-        }
-        setCurrentPacmanPlaying(value) {
-            this.currentPacman.isPlaying = value;
-            this.setPacman(this.currentPacman);
-        }
-    }
-
-    /* src\pages\Game.svelte generated by Svelte v3.44.3 */
-
-    const { console: console_1$1 } = globals;
-
-    function create_fragment$1(ctx) {
-    	const block = {
-    		c: noop,
-    		l: function claim(nodes) {
-    			throw new Error("options.hydrate only works if the component was compiled with the `hydratable: true` option");
-    		},
-    		m: noop,
-    		p: noop,
-    		i: noop,
-    		o: noop,
-    		d: noop
-    	};
-
-    	dispatch_dev("SvelteRegisterBlock", {
-    		block,
-    		id: create_fragment$1.name,
-    		type: "component",
-    		source: "",
-    		ctx
-    	});
-
-    	return block;
-    }
-
-    function instance$1($$self, $$props, $$invalidate) {
-    	let $pacmanName;
-    	let $pacmanId;
-    	validate_store(pacmanName, 'pacmanName');
-    	component_subscribe($$self, pacmanName, $$value => $$invalidate(3, $pacmanName = $$value));
-    	validate_store(pacmanId, 'pacmanId');
-    	component_subscribe($$self, pacmanId, $$value => $$invalidate(4, $pacmanId = $$value));
-    	let { $$slots: slots = {}, $$scope } = $$props;
-    	validate_slots('Game', slots, []);
-    	let { ydoc } = $$props;
-    	let { provider } = $$props;
-    	console.log("Game created");
-
-    	onMount(() => {
-    		
-    	});
-
-    	onDestroy(() => {
-    		document.body.removeChild(renderer.domElement);
-    	}); //clearInterval(interval)
-
-    	let game = new Game();
-    	let keys = new KeyState();
-    	let renderer = game.createRenderer();
-    	let scene = game.createScene();
-    	let state = new GameState(ydoc);
-    	let map = new LevelMap(scene, state);
-    	let pacman = new Pacman($pacmanId, $pacmanName, provider.room.peerId, map.pacmanSpawn);
-    	state.setCurrentPacman(pacman);
-    	globalState.set(state);
-    	pacman.addToScene(scene);
-    	let camera = new Camera(renderer, pacman);
-
-    	//let hudCamera = game.createHudCamera(map)
-    	let frameCounter = 0;
-
-    	// Main game loop
-    	game.gameLoop(delta => {
-    		// Update local list of pacman
-    		state.updatePacmanLocal(scene);
-
-    		state.updateDotsLocal();
-    		pacman.movePacman(delta, keys, map, state);
-    		pacman.updateFrame();
-    		camera.updateCamera(delta);
-
-    		// Set my pacman state
-    		state.setPacman(pacman);
-
-    		// Update other pacman frames
-    		for (let p of state.getPacmans()) {
-    			if (p.id != pacman.id) {
-    				p.updateFrame();
-    			} //p.calculateFakeMovement(delta)
-    		}
-
-    		// Render main view
-    		renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height);
-
-    		renderer.render(scene, camera.get());
-
-    		// Render HUD
-    		//renderHud(renderer, hudCamera, scene)
-    		if (frameCounter % 30 == 0) {
-    			controlOfflinePacmans();
-    		}
-
-    		frameCounter++;
-    	});
-
-    	function controlOfflinePacmans() {
-    		let connected = provider.room.bcConns;
-
-    		for (let p of state.getPacmans()) {
-    			if (p.peerId != pacman.peerId && p.isOnline && !connected.has(p.peerId)) {
-    				p.isOnline = false;
-    				state.setPacman(p);
-    				console.log("Offline pacman " + p.name);
-    			}
-    		}
-    	}
-
-    	const writable_props = ['ydoc', 'provider'];
-
-    	Object.keys($$props).forEach(key => {
-    		if (!~writable_props.indexOf(key) && key.slice(0, 2) !== '$$' && key !== 'slot') console_1$1.warn(`<Game> was created with unknown prop '${key}'`);
-    	});
-
-    	$$self.$$set = $$props => {
-    		if ('ydoc' in $$props) $$invalidate(0, ydoc = $$props.ydoc);
-    		if ('provider' in $$props) $$invalidate(1, provider = $$props.provider);
-    	};
-
-    	$$self.$capture_state = () => ({
-    		Camera,
-    		Game,
-    		KeyState,
-    		LevelMap,
-    		Pacman,
-    		GameState,
-    		pacmanName,
-    		pacmanId,
-    		globalState,
-    		onMount,
-    		onDestroy,
-    		ydoc,
-    		provider,
-    		game,
-    		keys,
-    		renderer,
-    		scene,
-    		state,
-    		map,
-    		pacman,
-    		camera,
-    		frameCounter,
-    		controlOfflinePacmans,
-    		$pacmanName,
-    		$pacmanId
-    	});
-
-    	$$self.$inject_state = $$props => {
-    		if ('ydoc' in $$props) $$invalidate(0, ydoc = $$props.ydoc);
-    		if ('provider' in $$props) $$invalidate(1, provider = $$props.provider);
-    		if ('game' in $$props) game = $$props.game;
-    		if ('keys' in $$props) keys = $$props.keys;
-    		if ('renderer' in $$props) renderer = $$props.renderer;
-    		if ('scene' in $$props) scene = $$props.scene;
-    		if ('state' in $$props) state = $$props.state;
-    		if ('map' in $$props) map = $$props.map;
-    		if ('pacman' in $$props) pacman = $$props.pacman;
-    		if ('camera' in $$props) camera = $$props.camera;
-    		if ('frameCounter' in $$props) frameCounter = $$props.frameCounter;
-    	};
-
-    	if ($$props && "$$inject" in $$props) {
-    		$$self.$inject_state($$props.$$inject);
-    	}
-
-    	return [ydoc, provider];
-    }
-
-    class Game_1 extends SvelteComponentDev {
-    	constructor(options) {
-    		super(options);
-    		init(this, options, instance$1, create_fragment$1, safe_not_equal, { ydoc: 0, provider: 1 });
-
-    		dispatch_dev("SvelteRegisterComponent", {
-    			component: this,
-    			tagName: "Game_1",
-    			options,
-    			id: create_fragment$1.name
-    		});
-
-    		const { ctx } = this.$$;
-    		const props = options.props || {};
-
-    		if (/*ydoc*/ ctx[0] === undefined && !('ydoc' in props)) {
-    			console_1$1.warn("<Game> was created without expected prop 'ydoc'");
-    		}
-
-    		if (/*provider*/ ctx[1] === undefined && !('provider' in props)) {
-    			console_1$1.warn("<Game> was created without expected prop 'provider'");
-    		}
-    	}
-
-    	get ydoc() {
-    		throw new Error("<Game>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
-    	}
-
-    	set ydoc(value) {
-    		throw new Error("<Game>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
-    	}
-
-    	get provider() {
-    		throw new Error("<Game>: Props cannot be read directly from the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
-    	}
-
-    	set provider(value) {
-    		throw new Error("<Game>: Props cannot be set directly on the component instance unless compiling with 'accessors: true' or '<svelte:options accessors/>'");
-    	}
-    }
-
-    /* eslint-env browser */
-
-    const reconnectTimeoutBase = 1200;
-    const maxReconnectTimeout = 2500;
-    // @todo - this should depend on awareness.outdatedTime
-    const messageReconnectTimeout = 30000;
-
-    /**
-     * @param {WebsocketClient} wsclient
-     */
-    const setupWS = (wsclient) => {
-      if (wsclient.shouldConnect && wsclient.ws === null) {
-        const websocket = new WebSocket(wsclient.url);
-        const binaryType = wsclient.binaryType;
-        /**
-         * @type {any}
-         */
-        let pingTimeout = null;
-        if (binaryType) {
-          websocket.binaryType = binaryType;
-        }
-        wsclient.ws = websocket;
-        wsclient.connecting = true;
-        wsclient.connected = false;
-        websocket.onmessage = event => {
-          wsclient.lastMessageReceived = getUnixTime();
-          const data = event.data;
-          const message = typeof data === 'string' ? JSON.parse(data) : data;
-          if (message && message.type === 'pong') {
-            clearTimeout(pingTimeout);
-            pingTimeout = setTimeout(sendPing, messageReconnectTimeout / 2);
-          }
-          wsclient.emit('message', [message, wsclient]);
-        };
-        /**
-         * @param {any} error
-         */
-        const onclose = error => {
-          if (wsclient.ws !== null) {
-            wsclient.ws = null;
-            wsclient.connecting = false;
-            if (wsclient.connected) {
-              wsclient.connected = false;
-              wsclient.emit('disconnect', [{ type: 'disconnect', error }, wsclient]);
-            } else {
-              wsclient.unsuccessfulReconnects++;
-            }
-            // Start with no reconnect timeout and increase timeout by
-            // log10(wsUnsuccessfulReconnects).
-            // The idea is to increase reconnect timeout slowly and have no reconnect
-            // timeout at the beginning (log(1) = 0)
-            setTimeout(setupWS, min(log10(wsclient.unsuccessfulReconnects + 1) * reconnectTimeoutBase, maxReconnectTimeout), wsclient);
-          }
-          clearTimeout(pingTimeout);
-        };
-        const sendPing = () => {
-          if (wsclient.ws === websocket) {
-            wsclient.send({
-              type: 'ping'
-            });
-          }
-        };
-        websocket.onclose = () => onclose(null);
-        websocket.onerror = error => onclose(error);
-        websocket.onopen = () => {
-          wsclient.lastMessageReceived = getUnixTime();
-          wsclient.connecting = false;
-          wsclient.connected = true;
-          wsclient.unsuccessfulReconnects = 0;
-          wsclient.emit('connect', [{ type: 'connect' }, wsclient]);
-          // set ping
-          pingTimeout = setTimeout(sendPing, messageReconnectTimeout / 2);
-        };
-      }
-    };
-
-    /**
-     * @extends Observable<string>
-     */
-    class WebsocketClient extends Observable {
-      /**
-       * @param {string} url
-       * @param {object} [opts]
-       * @param {'arraybuffer' | 'blob' | null} [opts.binaryType] Set `ws.binaryType`
-       */
-      constructor (url, { binaryType } = {}) {
-        super();
-        this.url = url;
-        /**
-         * @type {WebSocket?}
-         */
-        this.ws = null;
-        this.binaryType = binaryType || null;
-        this.connected = false;
-        this.connecting = false;
-        this.unsuccessfulReconnects = 0;
-        this.lastMessageReceived = 0;
-        /**
-         * Whether to connect to other peers or not
-         * @type {boolean}
-         */
-        this.shouldConnect = true;
-        this._checkInterval = setInterval(() => {
-          if (this.connected && messageReconnectTimeout < getUnixTime() - this.lastMessageReceived) {
-            // no message received in a long time - not even your own awareness
-            // updates (which are updated every 15 seconds)
-            /** @type {WebSocket} */ (this.ws).close();
-          }
-        }, messageReconnectTimeout / 2);
-        setupWS(this);
-      }
-
-      /**
-       * @param {any} message
-       */
-      send (message) {
-        if (this.ws) {
-          this.ws.send(JSON.stringify(message));
-        }
-      }
-
-      destroy () {
-        clearInterval(this._checkInterval);
-        this.disconnect();
-        super.destroy();
-      }
-
-      disconnect () {
-        this.shouldConnect = false;
-        if (this.ws !== null) {
-          this.ws.close();
-        }
-      }
-
-      connect () {
-        this.shouldConnect = true;
-        if (!this.connected && this.ws === null) {
-          setupWS(this);
-        }
-      }
-    }
-
-    /* eslint-env browser */
-
-    /**
-     * @typedef {Object} Channel
-     * @property {Set<Function>} Channel.subs
-     * @property {any} Channel.bc
-     */
-
-    /**
-     * @type {Map<string, Channel>}
-     */
-    const channels = new Map();
-
-    class LocalStoragePolyfill {
-      /**
-       * @param {string} room
-       */
-      constructor (room) {
-        this.room = room;
-        /**
-         * @type {null|function({data:ArrayBuffer}):void}
-         */
-        this.onmessage = null;
-        onChange(e => e.key === room && this.onmessage !== null && this.onmessage({ data: fromBase64(e.newValue || '') }));
-      }
-
-      /**
-       * @param {ArrayBuffer} buf
-       */
-      postMessage (buf) {
-        varStorage.setItem(this.room, toBase64(createUint8ArrayFromArrayBuffer(buf)));
-      }
-    }
-
-    // Use BroadcastChannel or Polyfill
-    const BC = typeof BroadcastChannel === 'undefined' ? LocalStoragePolyfill : BroadcastChannel;
-
-    /**
-     * @param {string} room
-     * @return {Channel}
-     */
-    const getChannel = room =>
-      setIfUndefined(channels, room, () => {
-        const subs = new Set();
-        const bc = new BC(room);
-        /**
-         * @param {{data:ArrayBuffer}} e
-         */
-        bc.onmessage = e => subs.forEach(sub => sub(e.data));
-        return {
-          bc, subs
-        }
-      });
-
-    /**
-     * Subscribe to global `publish` events.
-     *
-     * @function
-     * @param {string} room
-     * @param {function(any):any} f
-     */
-    const subscribe = (room, f) => getChannel(room).subs.add(f);
-
-    /**
-     * Unsubscribe from `publish` global events.
-     *
-     * @function
-     * @param {string} room
-     * @param {function(any):any} f
-     */
-    const unsubscribe = (room, f) => getChannel(room).subs.delete(f);
-
-    /**
-     * Publish data to all subscribers (including subscribers on this tab)
-     *
-     * @function
-     * @param {string} room
-     * @param {any} data
-     */
-    const publish = (room, data) => {
-      const c = getChannel(room);
-      c.bc.postMessage(data);
-      c.subs.forEach(sub => sub(data));
-    };
-
-    /**
-     * Mutual exclude for JavaScript.
-     *
-     * @module mutex
-     */
-
-    /**
-     * @callback mutex
-     * @param {function():void} cb Only executed when this mutex is not in the current stack
-     * @param {function():void} [elseCb] Executed when this mutex is in the current stack
-     */
-
-    /**
-     * Creates a mutual exclude function with the following property:
-     *
-     * ```js
-     * const mutex = createMutex()
-     * mutex(() => {
-     *   // This function is immediately executed
-     *   mutex(() => {
-     *     // This function is not executed, as the mutex is already active.
-     *   })
-     * })
-     * ```
-     *
-     * @return {mutex} A mutual exclude function
-     * @public
-     */
-    const createMutex = () => {
-      let token = true;
-      return (f, g) => {
-        if (token) {
-          token = false;
-          try {
-            f();
-          } finally {
-            token = true;
-          }
-        } else if (g !== undefined) {
-          g();
-        }
-      }
-    };
-
     var commonjsGlobal = typeof globalThis !== 'undefined' ? globalThis : typeof window !== 'undefined' ? window : typeof global !== 'undefined' ? global : typeof self !== 'undefined' ? self : {};
 
     function createCommonjsModule(fn) {
@@ -57753,7 +62451,7 @@ var app = (function () {
       const dataDecoder = createDecoder(data);
       const algorithm = readVarString(dataDecoder);
       if (algorithm !== 'AES-GCM') {
-        reject(create$2('Unknown encryption algorithm'));
+        reject(create$3('Unknown encryption algorithm'));
       }
       const iv = readVarUint8Array(dataDecoder);
       const cipher = readVarUint8Array(dataDecoder);
@@ -58192,7 +62890,7 @@ var app = (function () {
     const openRoom = (doc, provider, name, key) => {
       // there must only be one room
       if (rooms.has(name)) {
-        throw create$2(`A Yjs Doc connected to room "${name}" already exists!`)
+        throw create$3(`A Yjs Doc connected to room "${name}" already exists!`)
       }
       const room = new Room(doc, provider, name, key);
       rooms.set(name, /** @type {Room} */ (room));
@@ -58526,7 +63224,7 @@ var app = (function () {
     	return block;
     }
 
-    const version = "version 0.0.4";
+    const version = "version 0.1.4";
 
     function instance($$self, $$props, $$invalidate) {
     	let $pacmanName;
