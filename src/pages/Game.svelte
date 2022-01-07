@@ -1,14 +1,14 @@
 <script lang="ts">
     import type * as Y from 'yjs'
-    import { Camera } from '../game/camera';
+    import { Camera } from '../game/camera'
     import { Game } from '../game/game'
-    import { KeyState } from '../game/key_state';
-    import { LevelMap } from '../game/level_map';
-    import { Pacman } from '../game/pacman';
-    import { GameState } from '../game/state';
-    import { pacmanName, pacmanId, globalState } from '../store.js';
-    import { onMount, onDestroy } from 'svelte';
-    import type { WebrtcProvider } from 'y-webrtc';
+    import { KeyState } from '../game/keyboard'
+    import { World } from '../game/world'
+    import { Pacman } from '../game/pacman'
+    import { GameState } from '../game/state'
+    import { pacmanName, pacmanId, globalState } from '../store.js'
+    import { onMount, onDestroy } from 'svelte'
+    import type { WebrtcProvider } from 'y-webrtc'
     
     export let ydoc: Y.Doc
     export let provider: WebrtcProvider
@@ -28,7 +28,7 @@
     let scene = game.createScene()
     
     let state = new GameState(ydoc)
-    let map = new LevelMap(scene, state)
+    let map = new World(scene, state)
     let pacman =  new Pacman($pacmanId, $pacmanName, provider.room.peerId, map.pacmanSpawn)
     state.setCurrentPacman(pacman)
     globalState.set(state)
@@ -39,27 +39,36 @@
     //let hudCamera = game.createHudCamera(map)
     
     let frameCounter = 0
+    let recomputeGhostTargetFrame = Math.floor(Math.random() * 60)
     // Main game loop
     game.gameLoop( (delta) => {
-        // Update local list of pacman
+        // Update local state
         state.updatePacmanLocal(scene)
+        state.updateGhostsLocal()
         state.updateDotsLocal()
     
         pacman.movePacman(delta, keys, map, state)
-        pacman.updateFrame()
-    
-        camera.updateCamera(delta)
-    
-        // Set my pacman state
-        state.setPacman(pacman)
-    
         // Update other pacman frames
-        for( let p of state.getPacmans()){
-            if(p.id != pacman.id){
-                p.updateFrame()
-                //p.calculateFakeMovement(delta)
+        for( let p of state.getPacmansList()){
+            p.updateFrame(pacman)
+        }
+        // Update pacam camera
+        camera.updateCamera(delta)
+        // Set current pacman state
+        state.setPacman(pacman)
+
+        // Compute target for necessary ghosts
+        if(frameCounter % recomputeGhostTargetFrame == 0){
+            game.computeGhostTarget(state, frameCounter == 0)
+        }
+        // Update ghosts position
+        for( let g of state.getGhosts()){
+            if(g.pacmanTarget && g.pacmanTarget == pacman.id){
+                g.moveGhost(delta, map)
+                state.setGhost(g)
             }
         }
+
         // Render main view
         renderer.setViewport(0, 0, renderer.domElement.width, renderer.domElement.height)
         renderer.render(scene, camera.get())
@@ -68,23 +77,13 @@
         //renderHud(renderer, hudCamera, scene)
 
         if(frameCounter % 30 == 0){
-            controlOfflinePacmans()
+            game.controlOfflinePacmans(provider, state)
         }
         frameCounter++
     })
-    
-    function controlOfflinePacmans(){
-        let connected = provider.room.bcConns
-        for( let p of state.getPacmans()){
-            if(p.peerId != pacman.peerId && p.isOnline && !connected.has(p.peerId)){
-                p.isOnline = false
-                state.setPacman(p)
-                console.log("Offline pacman " + p.name)
-            }
-        }
-    }
 
     /*setInterval(()=>{
-        console.log(Array.from(state.getPacmans()))
+        //console.log(Array.from(state.getPacmans()))
+        console.log(Array.from(state.getGhosts()))
     }, 1000)*/
 </script>
