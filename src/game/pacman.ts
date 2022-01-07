@@ -1,13 +1,13 @@
 import * as THREE from "three"
-import { AbstractType } from "yjs"
-import type { KeyState } from "./key_state"
-import type { LevelMap } from "./level_map"
+import type { KeyState } from "./keyboard"
+import type { World } from "./world"
 import type { GameState } from "./state"
 import { Utils } from "./utils"
-//import * as TWEEN from "@tweenjs/tween.js"
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry'
+import JsonFont from "../font/Press_Start_2P_Regular.json";
 
-
-export class Pacman extends AbstractType<any>{
+export class Pacman {
     static readonly PACMAN_SPEED = 2
     static readonly PACMAN_RADIUS = 0.4
 
@@ -24,6 +24,7 @@ export class Pacman extends AbstractType<any>{
     public isOnline: boolean
 
     private mesh: THREE.Mesh
+    private textMesh: THREE.Mesh
     private frames: Array<THREE.SphereGeometry>
     // public color
 
@@ -32,10 +33,15 @@ export class Pacman extends AbstractType<any>{
     public direction: THREE.Vector3
     public isMoving: boolean
     public frameCounter: number
-    public deletedFlag: number = 0
+    //public deletedFlag: number = 0
 
     constructor(id: string, name: string, peerId: string, position: THREE.Vector3) {
-        super()
+        this.id = id
+        this.name = name
+        this.isPlaying = false
+        this.isOnline = true
+        this.peerId = peerId
+
         // Create spheres with decreasingly small horizontal sweeps, in order
         // to create pacman "death" animation.
         let pacmanGeometries = new Array<THREE.SphereGeometry>()
@@ -57,19 +63,13 @@ export class Pacman extends AbstractType<any>{
         // Initialize pacman facing to the left.
         this.mesh.position.copy(position)
         this.direction = new THREE.Vector3(-1, 0, 0)
-
-        this.id = id
-        this.name = name
-        this.isPlaying = false
-        this.isOnline = true
-        this.peerId = peerId
         
         this.frameCounter = 0
         this.isMoving = false
     }
 
     // Update pacman mesh simulating the eat movement
-    public updateFrame() {
+    public updateFrame(currentPacman: Pacman) {
         // Show eating animation based on how much pacman has moved.
         let maxAngle = Math.PI / 4
         let angle = (this.distanceMoved * 2) % (maxAngle * 2)
@@ -87,21 +87,24 @@ export class Pacman extends AbstractType<any>{
 
         if(!this.isOnline){
             this.mesh.material = Pacman.PACMAN_OFFLINE_MATERIAL
+            if(this.textMesh){
+                this.textMesh.material = Pacman.PACMAN_OFFLINE_MATERIAL
+            }
         }
-    }
 
-    // Used to predict movement of other players to avoid glitch due to poor connection
-    public calculateFakeMovement(delta: number) {
-        if( this.isMoving && this.lastDistanceMoved == this.distanceMoved ){
-            console.log("calc fake")
-            this.mesh.translateOnAxis(this.direction, Pacman.PACMAN_SPEED * delta)
-            this.distanceMoved += Pacman.PACMAN_SPEED * delta
+        // Update text mesh
+        if(this.textMesh){
+            // Position text just above pacman.
+            this.textMesh.position.copy(this.mesh.position).add(Utils.UP)
+            // Rotate text so that it faces same direction as pacman.
+            this.textMesh.up.copy(currentPacman.direction)
+            this.textMesh.lookAt(this.textMesh.position.clone().add(Utils.UP))
+            this.textMesh.rotateX(Math.PI/2)
         }
-        this.lastDistanceMoved = this.distanceMoved
     }
 
     // Elaborate key pressed and change pacman position
-    public movePacman(delta: number, keys: KeyState, levelMap: LevelMap, state: GameState) {
+    public movePacman(delta: number, keys: KeyState, levelMap: World, state: GameState) {
     
         this.isMoving = false
         // Move based on current keys being pressed.
@@ -145,15 +148,11 @@ export class Pacman extends AbstractType<any>{
         if (levelMap.isWall(bottomSide)) {
             this.mesh.position.y = bottomSide.y + 0.5 + Pacman.PACMAN_RADIUS
         }
-    
-        let cell = levelMap.getAt(this.mesh.position)
-    
-        // Make pacman eat dots.
-        /*if (cell && cell.isDot === true && cell.visible === true) {
-            levelMap.removeAt(this.mesh.position)
-            //this.numDotsEaten += 1
-        }*/
 
+        // Wrap packman to level map
+        levelMap.wrapObject(this.mesh)
+    
+        // Eat dots
         let x = Math.round(this.mesh.position.x), y = Math.round(this.mesh.position.y)
         let dot = state.getDot(x, y)
         if(dot != null){
@@ -161,14 +160,6 @@ export class Pacman extends AbstractType<any>{
             state.updateDotShared(dot)
         }
     
-        // Make pacman eat power pellets.
-        //this.atePellet = false
-        if (cell && cell.isPowerPellet === true && cell.visible === true) {
-            levelMap.removeAt(this.mesh.position)
-            //this.atePellet = true
-    
-            //killSound.play()
-        }
     }
 
     // Get pacman position
@@ -179,6 +170,27 @@ export class Pacman extends AbstractType<any>{
     // Add mesh to 3d scene
     public addToScene(scene: THREE.Scene) {
         scene.add(this.mesh)
+        if(this.textMesh)
+            scene.add(this.textMesh)
+    }
+
+    public makeTextNick() {
+        let textMaterial = new THREE.MeshPhongMaterial({color: 'yellow'})
+        // Show 3D text banner.
+        let loader = new FontLoader()
+        let font = loader.parse(JsonFont)
+
+        let textGeometry = new TextGeometry(this.name, {
+            font: font,
+            size: 0.18,
+            height: 0.05
+        })
+
+        this.textMesh = new THREE.Mesh(textGeometry, textMaterial)
+        var center = new THREE.Vector3();
+        this.textMesh.geometry.computeBoundingBox();
+        this.textMesh.geometry.boundingBox.getCenter(center);
+        this.textMesh.geometry.center();
     }
 
     // Get plain js object

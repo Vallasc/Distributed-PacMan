@@ -1,29 +1,29 @@
 import type * as Y from 'yjs'
 import { Pacman } from './pacman'
 import type * as THREE from "three"
-import type { Dot } from './dot'
+import type { Dot } from './world'
 import type { Ghost } from './ghost'
 import { writable } from 'svelte/store';
-//import * as TWEEN from "@tweenjs/tween.js"
 
 export const pacmans = writable(new Array<Pacman>());
 
 export class GameState {
 
-    private pacmanDelIndex: number
-    public pacmansShared: Y.Map<Object> // Shared Map<pacman_id, pacman_object>
-    public pacmansLocal: Map<string, Pacman>
+    private ydoc: Y.Doc
 
-    public ghostsShared: Y.Map<Object> // Shared Map<ghost_id, ghost_object>
-    public ghostsLocal: Map<string, Ghost>
+    private pacmansShared: Y.Map<Object> // Shared Map<pacman_id, pacman_object>
+    private pacmansLocal: Map<string, Pacman>
 
-    public dotsShared: Y.Map<string> // Shared Map<dot_id, pacman_id>
-    //public dotsLocal: Map<string, Dot> // Map<dot_id, Dot>
-    public dotsMap: any
+    private ghostsShared: Y.Map<Object> // Shared Map<ghost_id, ghost_object>
+    private ghostsLocal: Map<string, Ghost>
 
-    public currentPacman: Pacman
+    private dotsShared: Y.Map<string> // Shared Map<dot_id, pacman_id>
+    private dotsMap: any
+
+    private currentPacman: Pacman
 
     constructor(ydoc: Y.Doc){        
+        this.ydoc = ydoc
 
         this.pacmansShared = ydoc.getMap('pacmans')
         this.pacmansLocal = new Map<string, Pacman>()
@@ -34,7 +34,7 @@ export class GameState {
         this.dotsShared = ydoc.getMap('dots')
         this.dotsMap = {}
 
-        this.pacmanDelIndex = 0
+        //this.pacmanDelIndex = 0
         this.currentPacman = null
     }
 
@@ -43,46 +43,57 @@ export class GameState {
     }
     
     public updatePacmanLocal(scene: THREE.Scene) {
-        this.pacmanDelIndex++;
         this.pacmansShared.forEach( (value: Object, key: string) => {
             let pLocal = this.pacmansLocal.get(key)
             if(pLocal != null) {
                 if(this.currentPacman && this.currentPacman.id != pLocal.id){
                     // Update pacman object
                     pLocal.copyObjIfSameId(value)
-                    pLocal.deletedFlag = this.pacmanDelIndex
+                    //pLocal.deletedFlag = this.pacmanDelIndex
                 }
             } else { 
                 // Add new pacman object
                 let pacman = Pacman.fromObj(value)
-                pacman.deletedFlag = this.pacmanDelIndex
+                pacman.makeTextNick()
                 this.pacmansLocal.set(key, pacman)
                 // Add pacman to scene
                 pacman.addToScene(scene)
             }
         })
-        // Delete pacman on local and update store
-        for( let id in this.pacmansLocal ){
-            let local = this.pacmansLocal.get(id)
-            if(local[1] != this.pacmanDelIndex)
-                this.pacmansLocal.delete(id)
-        }
-        //TWEEN.update();
+
     }
     public setPacman(pacman: Pacman) {
         this.pacmansShared.set(pacman.id, pacman.toPlainObj())
         this.pacmansLocal.set(pacman.id, pacman)
     }
-    public getPacmans(): IterableIterator<Pacman> {
+    public getPacmansList(): IterableIterator<Pacman> {
         return this.pacmansLocal.values()
+    }
+    public getPacmansMap(): Map<string, Pacman> {
+        return this.pacmansLocal
     }
 
     public updateGhostsLocal() {
+        this.ghostsShared.forEach( (value: Object, key: string) => {
+            let gLocal = this.ghostsLocal.get(key)
+            if(gLocal && gLocal.pacmanTarget != this.currentPacman.id)
+                gLocal.copyObj(value)
+        })
     }
+
+    public updateGhostsShared() {
+        this.ydoc.transact(()=>{
+            this.ghostsLocal.forEach((ghost)=>{
+                this.ghostsShared.set(ghost.id, ghost.toPlainObj())
+            })
+        })
+    }
+
     public setGhost(ghost: Ghost) {
         this.ghostsShared.set(ghost.id, ghost.toPlainObj())
         this.ghostsLocal.set(ghost.id, ghost)
     }
+
     public getGhosts(): IterableIterator<Ghost> {
         return this.ghostsLocal.values()
     }
@@ -100,6 +111,7 @@ export class GameState {
             }
         }
     }
+
     public initDot(dot: Dot) {
         // Add to map
         let x = dot.getPosition().x
@@ -129,7 +141,7 @@ export class GameState {
     public checkIfAllPlaying(): boolean {
         let out = true
         this.pacmansShared.forEach( (value: Object, key: string) => {
-            if(value["isPlaying"] == false) 
+            if(!value["isPlaying"] && value["isOnline"]) 
                 out = false
         })
         return out
