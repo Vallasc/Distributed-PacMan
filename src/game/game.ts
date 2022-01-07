@@ -1,5 +1,7 @@
 import * as THREE from "three"
+import type { WebrtcProvider } from "y-webrtc"
 import { Pacman } from "./pacman"
+import type { GameState } from "./state"
 export class Game {
 
     // Constants
@@ -58,38 +60,6 @@ export class Game {
         })
     }
 
-    public createGhost(scene, position) {
-        let ghostGeometry = new THREE.SphereGeometry(Game.GHOST_RADIUS, 16, 16)
-
-        // Give each ghost it's own material so we can change the colors of individual ghosts.
-        let ghostMaterial = new THREE.MeshPhongMaterial({ color: 'red' })
-        let ghost: any = new THREE.Mesh(ghostGeometry, ghostMaterial)
-        ghost.isGhost = true
-        ghost.isWrapper = true
-        ghost.isAfraid = false
-
-        // Ghosts start moving left.
-        ghost.position.copy(position)
-        ghost.direction = new THREE.Vector3(-1, 0, 0)
-
-        scene.add(ghost)
-    }
-
-    // Make object wrap to other side of map if it goes out of bounds.
-    public wrapObject(object, map) {
-        if (object.position.x < map.left)
-            object.position.x = map.right
-        else if (object.position.x > map.right)
-            object.position.x = map.left
-
-        if (object.position.y > map.top)
-            object.position.y = map.bottom
-        else if (object.position.y < map.bottom)
-            object.position.y = map.top
-    }
-
-
-
 
     // Generic functions
     // =================
@@ -107,7 +77,7 @@ export class Game {
         // How many seconds the animation has progressed in total.
         let animationSeconds = 0
 
-        let render = function () {
+        let render = () => {
             let now = window.performance.now()
             let animationDelta = (now - previousFrameTime) / 1000
             previousFrameTime = now
@@ -128,7 +98,73 @@ export class Game {
 
             requestAnimationFrame(render)
         }
-
         requestAnimationFrame(render)
+    }
+
+    private computeAssignablePacmans(pacmansMap: Map<string, Pacman>): Map<string, Pacman> {
+        let assignablePacmans = new Map<string, Pacman>()
+        for(let p of pacmansMap){
+            if(p[1].isOnline){
+                assignablePacmans.set(p[0], p[1])
+            }
+        }
+        return assignablePacmans;
+    }
+
+    public computeGhostTarget(state: GameState, overwrite: boolean = false){
+
+        let pacmansMap = state.getPacmansMap()
+        let ghosts = state.getGhosts()
+
+        let assignablePacmans = this.computeAssignablePacmans(pacmansMap)
+        // Remove from assignable all pacmans that are already assigned and are good
+        for(let ghost of ghosts){
+            if(overwrite){
+                ghost.pacmanTarget = null
+            }
+            if(ghost.pacmanTarget){
+                let pacman = pacmansMap.get(ghost.pacmanTarget)
+                if(pacman && pacman.isOnline){ // good
+                    assignablePacmans.delete(pacman.id)                    
+                } else {
+                    ghost.pacmanTarget = null
+                }
+            }
+        }
+
+        ghosts = state.getGhosts()
+        for(let ghost of ghosts){
+            // If there is less pacmans than ghosts assign multiple 
+            if(!ghost.pacmanTarget){
+                if(assignablePacmans.size == 0 )
+                    assignablePacmans = this.computeAssignablePacmans(pacmansMap)
+                let assignablePList = Array.from(assignablePacmans.values())
+                let randomIndex = Math.floor(Math.random() * assignablePList.length)
+                let randomPacman: Pacman = assignablePList.at(randomIndex)
+                assignablePacmans.delete(randomPacman.id)
+                ghost.pacmanTarget = randomPacman.id
+                console.log("New pacman assigned to ghost" + ghost.id + "->" + randomPacman.name)
+            }
+        }
+
+        state.updateGhostsShared()
+    }
+
+    public controlOfflinePacmans(provider: WebrtcProvider, state: GameState){
+        let connected = provider.room.bcConns
+        console.log(provider.room.peerId)
+        console.log(connected)
+        for( let p of state.getPacmansList()){
+            /*if(!connected.has(p.peerId)){
+                console.log("Peer list non ha  " + p.name)
+                console.log("Peer list non ha  " + p.peerId)
+            }*/
+            /*if(p.peerId != pacman.peerId && p.isOnline && !connected.has(p.peerId)){
+                p.isOnline = false
+                state.setPacman(p)
+                console.log("Offline pacman " + p.name)
+                console.log("Offline pacman " + p.name)
+            }*/
+        }
     }
 }
