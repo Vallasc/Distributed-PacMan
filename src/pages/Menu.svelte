@@ -27,6 +27,7 @@
 	gameState.observeDeep(() => {
 		let value: boolean = gameState.get("game_started")
 		// control if not null and not false
+        //console.log(value)
 		if( value ) {
 			gameStarted = value
             if(gameStarted && insertName){
@@ -79,7 +80,7 @@
                     clearInterval(interval)
                 }
             }
-        }, 100)
+        }, 300)
     }
 
 </script>
@@ -109,7 +110,6 @@
                     <div class="pacman-name">
                         • {pacman.name}
                         {#if $pacmanId == pacman.id}(YOU){/if}
-                        {#if $pacmanId == pacman.id}{provider.room.peerId}(PEERID){/if}
                     </div>
                 {/each}
             </div>
