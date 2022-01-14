@@ -1,16 +1,14 @@
 <script lang="ts">
     import type * as Y from 'yjs'
     import { Camera, HUDCamera } from '../game/camera'
-    import { Game } from '../game/game'
-    import { KeyState } from '../game/keyboard'
+    import { Game } from '../game/logic'
     import { World } from '../game/world'
     import { Pacman } from '../game/pacman'
     import { GameState } from '../game/state'
-    import { pacmanName, pacmanId, globalState } from '../store.js'
+    import { pacmanName, pacmanId, globalState } from '../store'
     import { onDestroy } from 'svelte'
     import type { WebrtcProvider } from 'y-webrtc'
-    import { Ghost } from '../game/ghost';
-    import * as THREE from 'three';
+    import { KeyState } from '../game/keyboard';
     
     export let ydoc: Y.Doc
     export let provider: WebrtcProvider
@@ -22,10 +20,10 @@
     })
 
     provider.awareness.on("change", ()=>{
-		//game.checkOfflinePacmans(provider, state)
-		console.log(provider.awareness.getStates())
+		console.log( Array.from(provider.awareness.getStates().keys()))
 	})
 
+    const gameStartAudio = new Audio("./audio/game_start.mp3")
     let score = 0
     let lives = 3
 
@@ -39,7 +37,7 @@
     let pacman =  new Pacman($pacmanId, $pacmanName, provider.awareness.clientID, map.pacmanSpawn)
     state.setCurrentPacman(pacman)
     globalState.set(state)
-    pacman.addToScene(scene)
+    pacman.addToScene(scene, pacman)
     
     let camera = new Camera(renderer, pacman)
     let hudCamera = new HUDCamera(map)
@@ -49,12 +47,16 @@
 
     let isGameStarted = false
 
-
     let interval = setInterval(() => {
-        isGameStarted = state.checkIfAllPlaying()
-        if(isGameStarted)
+        let started = state.checkIfAllPlaying()
+        if(started) {
             clearInterval(interval)
+            gameStartAudio.play()
+            setTimeout( () => isGameStarted = true, 4000 )
+        }
     }, 100)
+
+
     // Main game loop
     game.gameLoop( (delta, now) => {
 
@@ -65,7 +67,7 @@
 
         if(isGameStarted && pacman.isAlive){
             pacman.move(delta, keys, map)
-            pacman.eatDots(state)
+            pacman.eatDot(state)
         }
         // Update other pacman frames
         for( let p of state.getPacmansList()){
@@ -91,15 +93,15 @@
             if(isGameStarted){
                 for( let g of state.getGhosts()) {
                     if(g.pacmanTarget && g.pacmanTarget == pacman.id) {
-                        g.mesh.material = Ghost.OTHER_GHOST_MATERIAL
+                        //g.mesh.material = Ghost.OTHER_GHOST_MATERIAL
                         g.move(delta, map, state)
                         state.setGhost(g)
                     } else {
-                        g.mesh.material = Ghost.GHOST_MATERIAL
+                        //g.mesh.material = Ghost.GHOST_MATERIAL
                     }
                     
                     // Mitigates the delay caused by a bad internet connection
-                    moveFakeGhost(g, delta)
+                    game.moveFakeGhost(g, delta, map)
                     pacman.checkGhostCollision(g, now)
                 }
             }
@@ -113,32 +115,9 @@
         hudCamera.render(renderer, scene)
 
         score = state.getScore()
+        lives = pacman.nLives
         frameCounter++
     })
-
-    let lastGhostFreezePositions = new Map<string, THREE.Vector3>()
-    let lastGhostFakePositions = new Map<string, THREE.Vector3>()
-    function moveFakeGhost(ghost: Ghost, delta: number){
-        let lastFreezePosition = lastGhostFreezePositions.get(ghost.id)
-        let lastFakePosition = lastGhostFakePositions.get(ghost.id)
-        if(!lastFreezePosition){
-            lastFreezePosition = new THREE.Vector3()
-            lastGhostFreezePositions.set(ghost.id, lastFreezePosition)
-        }
-        if(!lastFakePosition){
-            lastFakePosition = new THREE.Vector3()
-            lastGhostFakePositions.set(ghost.id, lastFakePosition)
-        }
-
-        if(lastFreezePosition.equals(ghost.mesh.position)){
-            ghost.mesh.position.copy(lastFakePosition)
-            ghost.moveFake(delta, map)
-            lastFakePosition.copy(ghost.mesh.position)
-        } else {
-            lastFreezePosition.copy(ghost.mesh.position)
-            lastFakePosition.copy(ghost.mesh.position)
-        }
-    }
 
     /*setInterval(()=>{
         //console.log(Array.from(state.getPacmans()))
@@ -184,9 +163,9 @@
         justify-content: space-around;
         align-items: center;
         font-size: 20px;
-        border-radius: 20px;
+        border-radius: 16px;
         border-color: #FFF;
-        border-width: 2px;
+        border-width: 5px;
         border-style: solid;
     }
 
