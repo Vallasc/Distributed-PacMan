@@ -45,7 +45,11 @@ export class Camera{
     }
 
     public render(renderer: THREE.WebGLRenderer, scene: THREE.Scene) {
-        renderer.render(scene, this.camera)
+        try{
+            renderer.render(scene, this.camera)
+        } catch (e){
+            console.log(e)
+        }
     }
 }
 
@@ -77,7 +81,11 @@ export class HUDCamera{
         renderer.setScissorTest(true);
         renderer.setScissor(10, 10, 200, 200)
         renderer.setViewport(10, 10, 200, 200)
-        renderer.render(scene, this.camera)
+        try{
+            renderer.render(scene, this.camera)
+        } catch (e){
+            console.log(e)
+        }
         renderer.setScissorTest(false);
 
         // Reset scales after rendering HUD.
@@ -91,4 +99,6 @@ export class HUDCamera{
                 object.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
         })
     }
+
+    
 }
