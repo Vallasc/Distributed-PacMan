@@ -3,7 +3,7 @@ import { Ghost } from "./ghost"
 import type { GameState } from "./state"
 import { Mesh } from "./utils"
 
-export class World{
+export class World {
 
     static readonly LEVEL = [
         '# # # # # # # # # # # # # # # # # # # # # # # # # # # #',
@@ -44,24 +44,22 @@ export class World{
     public right: number
     public centerX: number
     public centerY: number
+    public numDots: number
 
-    private numDots: number
-    public pacmanSpawn: THREE.Vector3
-    public ghostSpawn: THREE.Vector3
     public exitGhostTarget: THREE.Vector3
+    public pacmanSpawn: THREE.Vector3
+    public ghostColors = ["red", "cyan", "pink", "orange"]
 
     private map: any
+
 
     constructor(scene: THREE.Scene, state: GameState) {
         let dotId = 0
         let ghostId = 0
 
-
         this.bottom = -(World.LEVEL.length - 1)
         this.top = this.left = this.right = 0
         this.numDots = 0
-        this.pacmanSpawn = null
-        this.ghostSpawn = null
 
         this.map = {}
         let x : number, y : number
@@ -107,12 +105,11 @@ export class World{
                 } else if (cell === 'P') {
                     this.pacmanSpawn = new THREE.Vector3(x, y, 0)
                 } else if (cell === 'G') {
-                    let ghost = new Ghost(ghostId.toString(), new THREE.Vector3(x, y, 0), ()=>{
+                    let ghost = new Ghost(ghostId.toString(), new THREE.Vector3(x, y, 0), this.ghostColors[ghostId], ()=>{
                         ghost.addToScene(scene)
                         state.setGhost(ghost)
                     })
                     ghostId++
-                    this.ghostSpawn = new THREE.Vector3(x, y, 0)
                 } else if (cell === 'T'){
                     this.exitGhostTarget = new THREE.Vector3(x, y, 0)
                 }
