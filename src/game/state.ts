@@ -8,9 +8,6 @@ import { writable } from 'svelte/store';
 export const pacmans = writable(new Array<Pacman>());
 
 export class GameState {
-
-    private ydoc: Y.Doc
-
     private pacmansShared: Y.Map<Object> // Shared Map<pacman_id, pacman_object>
     private pacmansLocal: Map<string, Pacman>
 
@@ -23,9 +20,10 @@ export class GameState {
     public currentPacman: Pacman
     public currentPacmanScore: number
 
-    constructor(ydoc: Y.Doc){        
-        this.ydoc = ydoc
+    public dotsNumber: number
+    public dotsEaten: number
 
+    constructor(ydoc: Y.Doc){        
         this.pacmansShared = ydoc.getMap('pacmans')
         this.pacmansLocal = new Map<string, Pacman>()
 
@@ -38,6 +36,8 @@ export class GameState {
         //this.pacmanDelIndex = 0
         this.currentPacman = null
         this.currentPacmanScore = 0
+        this.dotsNumber = 0
+        this.dotsEaten = 0
     }
 
     public setCurrentPacman(currentPacman: Pacman){
@@ -58,7 +58,7 @@ export class GameState {
                 pacman.makeTextNick()
                 this.pacmansLocal.set(key, pacman)
                 // Add pacman to scene
-                pacman.addToScene(scene)
+                pacman.addToScene(scene, this.currentPacman)
             }
         })
 
@@ -100,12 +100,15 @@ export class GameState {
 
     public updateDotsLocal() {
         this.currentPacmanScore = 0
+        this.dotsEaten = 0
         for (const y in this.dotsMap) {
             for (const x in this.dotsMap[y]) {
                 let dot: Dot = this.dotsMap[y][x]
                 let pacmanId = this.dotsShared.get(dot.id)
                 if( pacmanId ){
+                    this.dotsEaten++
                     dot.setVisible(false)
+                    dot.pacmanId = pacmanId
                     if(pacmanId === this.currentPacman.id)
                         this.currentPacmanScore += 100
                 } else {
@@ -123,6 +126,7 @@ export class GameState {
             this.dotsMap[y] = {}
         }
         this.dotsMap[y][x] = dot
+        this.dotsNumber++
     }
 
     // Update dot state
@@ -148,6 +152,14 @@ export class GameState {
                 out = false
         })
         return out
+    }
+
+    public checkGameEnded(): boolean {
+        let allPacmanDied = true
+        for(let p of this.getPacmansList()){
+            allPacmanDied = allPacmanDied && (p.nLives == 0 || !p.isOnline) 
+        }
+        return allPacmanDied || (this.dotsEaten == this.dotsNumber)
     }
 
     public setCurrentPacmanPlaying(value: boolean) {
