@@ -1,5 +1,6 @@
 import * as THREE from "three"
 import type { WebrtcProvider } from "y-webrtc"
+import type { Ghost } from "./ghost"
 import { Pacman } from "./pacman"
 import type { GameState } from "./state"
 export class Game {
@@ -9,11 +10,28 @@ export class Game {
     static readonly GHOST_SPEED = 1.5
     static readonly GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.25
 
+    constructor(){
+    }
+
     public createRenderer() {
-        let renderer = new THREE.WebGLRenderer({ antialias: true })
+        let pixelRatio = window.devicePixelRatio
+        let AA = true
+        if (pixelRatio > 1) {
+          AA = false
+        }
+        
+        let renderer = new THREE.WebGLRenderer({
+          antialias: AA,
+          //"high-performance", "low-power" or "default"
+          powerPreference: "high-performance",
+          //"highp", "mediump" or "lowp"
+          precision: "lowp"
+        })
+
         renderer.setClearColor('black', 1.0)
         renderer.setSize(window.innerWidth, window.innerHeight)
         document.body.appendChild(renderer.domElement)
+        // Reduce resolution for performance
         return renderer
     }
 
@@ -30,46 +48,6 @@ export class Game {
         return scene
     }
 
-    public createHudCamera(map) {
-        let halfWidth = (map.right - map.left) / 2, halfHeight = (map.top - map.bottom) / 2
-
-        let hudCamera = new THREE.OrthographicCamera(-halfWidth, halfWidth, halfHeight, -halfHeight, 1, 100)
-        hudCamera.position.copy(new THREE.Vector3(map.centerX, map.centerY, 10))
-        hudCamera.lookAt(new THREE.Vector3(map.centerX, map.centerY, 0))
-
-        return hudCamera
-    }
-
-    public renderHud(renderer, hudCamera, scene) {
-        // Increase size of pacman and dots in HUD to make them easier to see.
-        scene.children.forEach(function (object) {
-            if (object.isWall !== true)
-                object.scale.set(2.5, 2.5, 2.5)
-        })
-
-        // Only render in the bottom left 200x200 square of the screen.
-        renderer.enableScissorTest(true)
-        renderer.setScissor(10, 10, 200, 200)
-        renderer.setViewport(10, 10, 200, 200)
-        renderer.render(scene, hudCamera)
-        renderer.enableScissorTest(false)
-
-        // Reset scales after rendering HUD.
-        scene.children.forEach(function (object) {
-            object.scale.set(1, 1, 1)
-        })
-    }
-
-
-    // Generic functions
-    // =================
-    public distance(object1, object2) {
-        let difference = new THREE.Vector3()
-        // Calculate difference between objects' positions.
-        difference.copy(object1.position).sub(object2.position)
-
-        return difference.length()
-    }
 
     public gameLoop(callback : (delta: number, now: number) => any) {
         let previousFrameTime = window.performance.now()
@@ -97,74 +75,84 @@ export class Game {
             callback(animationDelta, animationSeconds)
 
             requestAnimationFrame(render)
+            //setTimeout(render, 0)
         }
         requestAnimationFrame(render)
+        //setTimeout(render, 0)
     }
 
-    private computeAssignablePacmans(pacmansMap: Map<string, Pacman>): Map<string, Pacman> {
-        let assignablePacmans = new Map<string, Pacman>()
+    // return map<pacmanId, [Pacman, ghostNumber]
+    private computeAssignablePacmans(pacmansMap: Map<string, Pacman>): Map<string, [Pacman, number]> {
+        let assignablePacmans = new Map<string, [Pacman, number]>()
         for(let p of pacmansMap){
             if(p[1].isOnline){
-                assignablePacmans.set(p[0], p[1])
+                assignablePacmans.set(p[0], [p[1], 0])
             }
         }
         return assignablePacmans;
     }
 
-    public computeGhostTarget(state: GameState, overwrite: boolean = false){
-
+    public computeGhostTarget(state: GameState){
         let pacmansMap = state.getPacmansMap()
-        let ghosts = state.getGhosts()
-
+        let ghosts = Array.from(state.getGhosts())
+        let ghostsSize = 0
+        let recomputeGhosts = false
         let assignablePacmans = this.computeAssignablePacmans(pacmansMap)
-        // Remove from assignable all pacmans that are already assigned and are good
+
+        // Clean ghosts state
+        // Remove from assignable all pacmans that are already assigned and are alive
         for(let ghost of ghosts){
-            if(overwrite){
-                ghost.pacmanTarget = null
-            }
             if(ghost.pacmanTarget){
-                let pacman = pacmansMap.get(ghost.pacmanTarget)
-                if(pacman && pacman.isOnline){ // good
-                    assignablePacmans.delete(pacman.id)                    
+                let pacman = assignablePacmans.get(ghost.pacmanTarget)
+                if(pacman){
+                    pacman[1]++
                 } else {
                     ghost.pacmanTarget = null
+                    recomputeGhosts = true
                 }
+            } else {
+                recomputeGhosts = true
             }
+            ghostsSize++
         }
 
-        ghosts = state.getGhosts()
-        for(let ghost of ghosts){
-            // If there is less pacmans than ghosts assign multiple 
-            if(!ghost.pacmanTarget){
+        let maxGhostPerPacman = Math.ceil(ghostsSize / assignablePacmans.size)
+        assignablePacmans.forEach((value) => {
+            // Max ghosts excedeed
+            if(value[1] > maxGhostPerPacman){
+                recomputeGhosts = true
+            }
+        })
+        if(recomputeGhosts) {
+            for(let ghost of ghosts){
                 if(assignablePacmans.size == 0 )
                     assignablePacmans = this.computeAssignablePacmans(pacmansMap)
+
                 let assignablePList = Array.from(assignablePacmans.values())
                 let randomIndex = Math.floor(Math.random() * assignablePList.length)
-                let randomPacman: Pacman = assignablePList.at(randomIndex)
+                let randomPacman: Pacman = assignablePList.at(randomIndex)[0]
                 assignablePacmans.delete(randomPacman.id)
                 ghost.pacmanTarget = randomPacman.id
-                console.log("New pacman assigned to ghost" + ghost.id + "->" + randomPacman.name)
+                console.log("Pacman assigned to ghost" + ghost.id + "->" + randomPacman.name)
             }
+            state.updateGhostsShared()
         }
-
-        state.updateGhostsShared()
     }
 
-    public controlOfflinePacmans(provider: WebrtcProvider, state: GameState){
-        let connected = provider.room.bcConns
-        console.log(provider.room.peerId)
-        console.log(connected)
+    public checkOfflinePacmans(provider: WebrtcProvider, state: GameState){
+        let connected = provider.awareness.getStates()
+        //console.log(connected)
         for( let p of state.getPacmansList()){
-            /*if(!connected.has(p.peerId)){
-                console.log("Peer list non ha  " + p.name)
-                console.log("Peer list non ha  " + p.peerId)
-            }*/
-            /*if(p.peerId != pacman.peerId && p.isOnline && !connected.has(p.peerId)){
-                p.isOnline = false
+            if(p.peerId != state.currentPacman.peerId){
+                if(p.isOnline){
+                    p.isOnline = connected.has(p.peerId)
+                    state.setPacman(p)
+                    //console.log("Pacman " + p.name + " status online: " + p.isOnline)
+                }
+            } else { // It's me, i'm alive
+                p.isOnline = true
                 state.setPacman(p)
-                console.log("Offline pacman " + p.name)
-                console.log("Offline pacman " + p.name)
-            }*/
+            }
         }
     }
 }
