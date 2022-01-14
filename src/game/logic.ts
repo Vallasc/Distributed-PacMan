@@ -3,15 +3,11 @@ import type { WebrtcProvider } from "y-webrtc"
 import type { Ghost } from "./ghost"
 import { Pacman } from "./pacman"
 import type { GameState } from "./state"
+import type { World } from "./world"
 export class Game {
 
-    // Constants
-    // =========
-    static readonly GHOST_SPEED = 1.5
+    static readonly GHOST_SPEED = Pacman.PACMAN_SPEED - 1
     static readonly GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.25
-
-    constructor(){
-    }
 
     public createRenderer() {
         let pixelRatio = window.devicePixelRatio
@@ -124,6 +120,7 @@ export class Game {
             }
         })
         if(recomputeGhosts) {
+            let toPrint = "| Ghosts targets\n"
             for(let ghost of ghosts){
                 if(assignablePacmans.size == 0 )
                     assignablePacmans = this.computeAssignablePacmans(pacmansMap)
@@ -133,8 +130,9 @@ export class Game {
                 let randomPacman: Pacman = assignablePList.at(randomIndex)[0]
                 assignablePacmans.delete(randomPacman.id)
                 ghost.pacmanTarget = randomPacman.id
-                console.log("Pacman assigned to ghost" + ghost.id + "->" + randomPacman.name)
+                toPrint += "| ghost" + ghost.id + "\t -> " + randomPacman.name + "\n"
             }
+            console.log(toPrint)
             state.updateGhostsShared()
         }
     }
@@ -153,6 +151,30 @@ export class Game {
                 p.isOnline = true
                 state.setPacman(p)
             }
+        }
+    }
+
+    public lastGhostFreezePositions = new Map<string, THREE.Vector3>()
+    public lastGhostFakePositions = new Map<string, THREE.Vector3>()
+    public moveFakeGhost(ghost: Ghost, delta: number, map: World){
+        let lastFreezePosition = this.lastGhostFreezePositions.get(ghost.id)
+        let lastFakePosition = this.lastGhostFakePositions.get(ghost.id)
+        if(!lastFreezePosition){
+            lastFreezePosition = new THREE.Vector3()
+            this.lastGhostFreezePositions.set(ghost.id, lastFreezePosition)
+        }
+        if(!lastFakePosition){
+            lastFakePosition = new THREE.Vector3()
+            this.lastGhostFakePositions.set(ghost.id, lastFakePosition)
+        }
+
+        if(lastFreezePosition.equals(ghost.mesh.position)){
+            ghost.mesh.position.copy(lastFakePosition)
+            ghost.moveFake(delta, map)
+            lastFakePosition.copy(ghost.mesh.position)
+        } else {
+            lastFreezePosition.copy(ghost.mesh.position)
+            lastFakePosition.copy(ghost.mesh.position)
         }
     }
 }
