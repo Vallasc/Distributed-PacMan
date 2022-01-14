@@ -1,6 +1,7 @@
 import * as THREE from "three"
 import { Ghost } from "./ghost"
 import type { GameState } from "./state"
+import { Mesh } from "./utils"
 
 export class World{
 
@@ -16,7 +17,7 @@ export class World{
         '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
         '# # # # # # . # # # # #   # #   # # # # # . # # # # # #',
         '          # . # # # # #   # #   # # # # # . #          ',
-        '          # . # #                     # # . #          ',
+        '          # . # #           T         # # . #          ',
         '          # . # #   # # # X X # # #   # # . #          ',
         '# # # # # # . # #   #     G   G   #   # # . # # # # # #',
         '            .       #   G   G     #       .            ',
@@ -37,16 +38,17 @@ export class World{
         '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
         '# # # # # # # # # # # # # # # # # # # # # # # # # # # #']
 
-    private bottom: number
-    private top: number
-    private left: number
-    private right: number
-    private centerX: number
-    private centerY: number
+    public bottom: number
+    public top: number
+    public left: number
+    public right: number
+    public centerX: number
+    public centerY: number
 
     private numDots: number
     public pacmanSpawn: THREE.Vector3
     public ghostSpawn: THREE.Vector3
+    public exitGhostTarget: THREE.Vector3
 
     private map: any
 
@@ -80,7 +82,6 @@ export class World{
                 x = Math.floor(column / 2)
 
                 let cell = World.LEVEL[row][column]
-                let object : any = null
 
                 if (cell === '#') {
                     let wall = new Wall(x, y)
@@ -112,6 +113,8 @@ export class World{
                     })
                     ghostId++
                     this.ghostSpawn = new THREE.Vector3(x, y, 0)
+                } else if (cell === 'T'){
+                    this.exitGhostTarget = new THREE.Vector3(x, y, 0)
                 }
             }
         }
@@ -149,16 +152,17 @@ export class World{
 
 class Wall {
     public isPassable: boolean
-    private mesh: THREE.Mesh;
+    private mesh: Mesh;
 
     constructor(x: number, y: number, isPassable: boolean = false){
         let wallGeometry = new THREE.BoxGeometry(1, 1, 1)
         let wallMaterial = new THREE.MeshLambertMaterial({ color: 'blue' })
         
-        this.mesh = new THREE.Mesh(wallGeometry, wallMaterial)
+        this.mesh = new Mesh(wallGeometry, wallMaterial)
         this.mesh.position.set(x, y, 0)
         this.isPassable = isPassable
         this.mesh.visible = !isPassable
+        this.mesh.isWall = true
     }
 
     public addToScene(scene: THREE.Scene) {
@@ -171,7 +175,7 @@ export class Dot {
     static readonly DOT_RADIUS = 0.1
     static readonly DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2
 
-    private mesh: THREE.Mesh
+    private mesh: Mesh
     public id: string
 
     public pacmanId: string
@@ -180,12 +184,13 @@ export class Dot {
     constructor(id: string, position: THREE.Vector3, isPowerDot: boolean = false){
         this.isPowerDot = isPowerDot
         let dotGeometry = isPowerDot ? new THREE.SphereGeometry(Dot.DOT_RADIUS_POWER) : new THREE.SphereGeometry(Dot.DOT_RADIUS)
-        let dotMaterial = new THREE.MeshPhongMaterial({ color: 0xFFDAB9 }) // Paech color
+        let dotMaterial = new THREE.MeshLambertMaterial({ color: 0xFFDAB9 }) // Paech color
 
-        this.mesh = new THREE.Mesh(dotGeometry, dotMaterial)
+        this.mesh = new Mesh(dotGeometry, dotMaterial)
         this.mesh.position.copy(position)
         this.id = id
         this.pacmanId = null
+        this.mesh.isDot = true
     }
 
     public setVisible(value: boolean){
