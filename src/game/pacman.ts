@@ -9,11 +9,17 @@ import JsonFont from "../font/Press_Start_2P_Regular.json";
 import type { Ghost } from "./ghost"
 
 export class Pacman {
-    static readonly PACMAN_SPEED = 2.5
+    static readonly PACMAN_SPEED = 3
     static readonly PACMAN_RADIUS = 0.4
 
     static readonly PACMAN_ONLINE_MATERIAL = new THREE.MeshLambertMaterial({ color: 'yellow', side: THREE.DoubleSide })
     static readonly PACMAN_OFFLINE_MATERIAL = new THREE.MeshLambertMaterial({ color: 'gray', side: THREE.DoubleSide })
+
+    static readonly TIME_AFTER_DIE = 8000
+    static readonly EAT_DOT1_AUDIO = new Audio("./audio/dot_1.mp3")
+    static readonly EAT_DOT2_AUDIO = new Audio("./audio/dot_2.mp3")
+    static readonly DEATH_AUDIO = new Audio("./audio/death.mp3")
+    static readonly EXTRA_LIFE_AUDIO = new Audio("./audio/extra_life.mp3")
 
     public id: string
     public name: string
@@ -26,17 +32,21 @@ export class Pacman {
 
     // true if the pacman is alive
     public isAlive: boolean
+    public nLives: number
     public lostTime: number
+    public isMoving: boolean
+
+    public transparentMode: boolean = false
 
     public mesh: Mesh
     public textMesh: THREE.Mesh
+    public dieTextMesh: THREE.Mesh
+    public gameOverTextMesh: THREE.Mesh
     public frames: Array<THREE.SphereGeometry>
     // public color
 
     public distanceMoved: number
     public direction: THREE.Vector3
-    public isMoving: boolean
-    //public deletedFlag: number = 0
 
     constructor(id: string, name: string, peerId: number, position: THREE.Vector3) {
         this.id = id
@@ -59,16 +69,21 @@ export class Pacman {
 
         this.mesh = new Mesh(pacmanGeometries[0], pacmanMaterial)
         this.frames = pacmanGeometries
-
         this.distanceMoved = 0
 
         // Initialize pacman facing to the left.
         this.mesh.position.copy(position)
         this.direction = new THREE.Vector3(-1, 0, 0)
         
+        this.makeYouDieText()
+        this.makeGameOverText()
+
         this.isMoving = false
         this.isAlive = true
+        this.nLives = 3
+        this.lostTime = -1
         this.mesh.isPacman = true
+        Pacman.EAT_DOT1_AUDIO.onended = () => Pacman.EAT_DOT2_AUDIO.play()
     }
 
     // Update pacman mesh simulating the eat movement
@@ -76,10 +91,13 @@ export class Pacman {
         // Animate model
         let frame: number
         if (!this.isAlive) {
+            if(this.lostTime == -1)
+                this.lostTime = timeNow
             // if pacman got eaten, show dying animation
             let angle = (timeNow - this.lostTime) * Math.PI / 2;
             frame = Math.min(this.frames.length - 1, Math.floor(angle / Math.PI * this.frames.length));
         } else {
+            this.lostTime = -1
             // show eating animation based on how much pacman has moved
             let maxAngle = Math.PI / 4
             let angle = (this.distanceMoved * 2) % (maxAngle * 2)
@@ -87,7 +105,7 @@ export class Pacman {
                 angle = maxAngle * 2 - angle
             frame = Math.floor(angle / Math.PI * this.frames.length)
         }
-            this.mesh.geometry = this.frames[frame]
+        this.mesh.geometry = this.frames[frame]
 
         // Update rotation based on direction so that mouth is always facing forward.
         // The "mouth" part is on the side of the sphere, make it "look" up but
@@ -115,13 +133,27 @@ export class Pacman {
             this.textMesh.up.copy(currentPacman.direction)
             this.textMesh.lookAt(this.textMesh.position.clone().add(Utils.UP))
             this.textMesh.rotateX(Math.PI/2)
+            this.textMesh.visible = this.isAlive
         }
-    }
 
-    public moveFake(delta: number){
-        if(this.isMoving){
-            this.mesh.translateOnAxis(this.direction, delta * Pacman.PACMAN_SPEED)
-            // TODO WALL
+        if(this.dieTextMesh && currentPacman.id == this.id){
+            // Position text just above pacman.
+            this.dieTextMesh.position.copy(this.mesh.position).add(Utils.UP)
+            // Rotate text so that it faces same direction as pacman.
+            this.dieTextMesh.up.copy(currentPacman.direction)
+            this.dieTextMesh.lookAt(this.dieTextMesh.position.clone().add(Utils.UP))
+            this.dieTextMesh.translateZ(9)
+            this.dieTextMesh.visible = !this.isAlive && !(this.nLives == 0)
+        }
+
+        if(this.gameOverTextMesh && currentPacman.id == this.id){
+            // Position text just above pacman.
+            this.gameOverTextMesh.position.copy(this.mesh.position).add(Utils.UP)
+            // Rotate text so that it faces same direction as pacman.
+            this.gameOverTextMesh.up.copy(currentPacman.direction)
+            this.gameOverTextMesh.lookAt(this.gameOverTextMesh.position.clone().add(Utils.UP))
+            this.gameOverTextMesh.translateZ(9)
+            this.gameOverTextMesh.visible = !this.isAlive && (this.nLives == 0)
         }
     }
 
@@ -176,51 +208,73 @@ export class Pacman {
     
     }
 
-    public eatDots(state: GameState){
+    public eatDot(state: GameState){
         let x = Math.round(this.mesh.position.x), y = Math.round(this.mesh.position.y)
         let dot = state.getDot(x, y)
-        if(dot != null) {
+        if(dot && !dot.pacmanId) {
             dot.pacmanId = this.id
             state.updateDotShared(dot)
+            Pacman.EAT_DOT1_AUDIO.play()
         }
     }
 
     public checkGhostCollision(ghost: Ghost, timeNow: number) {
-        if(this.isAlive && Utils.distance(this.mesh.position, ghost.mesh.position) < Pacman.PACMAN_RADIUS*2){
-            console.log("YOU DIED")
+        if(!this.transparentMode && this.isAlive && 
+            Utils.distance(this.mesh.position, ghost.mesh.position) < Pacman.PACMAN_RADIUS*2){
+            console.log("YOU DIE")
+            this.nLives--
             this.isAlive = false
-            this.lostTime = timeNow
+            if(this.nLives != 0){
+                setTimeout(()=>{
+                    this.isAlive = true
+                    Pacman.EXTRA_LIFE_AUDIO.play()
+                }, Pacman.TIME_AFTER_DIE)
+            }
+            Pacman.DEATH_AUDIO.play()
         }
     }
 
-    public dieAnimation() {
-
-    }
-
     // Add mesh to 3d scene
-    public addToScene(scene: THREE.Scene) {
+    public addToScene(scene: THREE.Scene, currentPacman: Pacman) {
         scene.add(this.mesh)
         if(this.textMesh)
             scene.add(this.textMesh)
+        if(currentPacman.id == this.id){
+            scene.add(this.dieTextMesh)
+            scene.add(this.gameOverTextMesh)
+        }
     }
 
-    public makeTextNick() {
-        let textMaterial = new THREE.MeshPhongMaterial({color: 'yellow'})
+    public makeText(text: string, size: number, height: number, color: THREE.ColorRepresentation): THREE.Mesh {
+        let textMaterial = new THREE.MeshPhongMaterial({color: color})
         // Show 3D text banner.
         let loader = new FontLoader()
         let font = loader.parse(JsonFont)
 
-        let textGeometry = new TextGeometry(this.name, {
+        let textGeometry = new TextGeometry(text, {
             font: font,
-            size: 0.18,
-            height: 0.05
+            size: size,
+            height: height
         })
 
-        this.textMesh = new THREE.Mesh(textGeometry, textMaterial)
-        var center = new THREE.Vector3();
-        this.textMesh.geometry.computeBoundingBox();
-        this.textMesh.geometry.boundingBox.getCenter(center);
-        this.textMesh.geometry.center();
+        let textMesh = new THREE.Mesh(textGeometry, textMaterial)
+        let center = new THREE.Vector3()
+        textMesh.geometry.computeBoundingBox()
+        textMesh.geometry.boundingBox.getCenter(center)
+        textMesh.geometry.center()
+        return textMesh
+    }
+
+    public makeTextNick() {
+        this.textMesh = this.makeText(this.name, 0.18, 0.05, "yellow")
+    }
+
+    public makeYouDieText() {
+        this.dieTextMesh = this.makeText("YOU DIE", 0.7, 0.2, "red")
+    }
+
+    public makeGameOverText() {
+        this.gameOverTextMesh = this.makeText("GAME OVER", 0.8, 0.2, "red")
     }
 
     // Get plain js object
@@ -236,6 +290,7 @@ export class Pacman {
         obj["isPlaying"] = this.isPlaying
         obj["isOnline"] = this.isOnline
         obj["isAlive"] = this.isAlive
+        obj["nLives"] = this.nLives
         return obj
     }
 
@@ -256,6 +311,7 @@ export class Pacman {
         this.isPlaying = obj["isPlaying"]
         this.isOnline = obj["isOnline"]
         this.isAlive = obj["isAlive"]
+        this.nLives = obj["nLives"]
     }
 
     // Copy object if it has the same id
