@@ -4,7 +4,7 @@
     import { quintInOut } from 'svelte/easing'
     import { pacmanName, pacmanId, globalState } from '../store.js'
     import { Utils } from '../game/utils.js'
-    import type { Pacman } from '../game/pacman.js'
+    import { Pacman } from '../game/pacman.js'
     import Loading from './Loading.svelte'
     import type { WebrtcProvider } from 'y-webrtc'
 
@@ -23,18 +23,49 @@
 
     // Update game state
 	let gameState: Y.Map<any> = ydoc.getMap('game_state')
+    let gameAlreadyStarted = false
+
     let gameStarted = false
-	gameState.observeDeep(() => {
+    let gameEnded = false
+
+    let mainInterval = setInterval(() => {
+        // Check if game is started
 		let value: boolean = gameState.get("game_started")
-		// control if not null and not false
-        //console.log(value)
 		if( value ) {
-			gameStarted = value
-            if(gameStarted && insertName){
+			gameAlreadyStarted = value
+            if(gameAlreadyStarted && insertName){
                 closeConnection()
             }
+
+            if($globalState != null){
+                // Check if all players are ready
+                if(!gameStarted){
+                    gameStarted = $globalState.checkIfAllPlaying()
+                    if(gameStarted){
+                        console.log("Game started")
+                        hideMenu = true
+                    }
+                }
+
+                // Check if game is ended
+                if(!gameEnded){
+                    gameEnded = $globalState.checkGameEnded()
+                    if(gameEnded){
+                        console.log("Game Ended")
+                        pacmanList = Array.from($globalState.getPacmansList())
+                        pacmanList = pacmanList // for svelte reactivity
+                        provider.disconnect()
+                        clearInterval(mainInterval)
+                        setTimeout(() => {
+                            hideMenu = false
+                        }, Pacman.TIME_AFTER_DIE)
+                    }
+                }
+            }
+
 		}
-	})
+
+	}, 1000)
 
     function closeConnection(){
         errorGameStarted = true
@@ -43,7 +74,7 @@
 
     function handleSubmitName(e) {
         e.preventDefault()
-        if( !gameStarted ){
+        if( !gameAlreadyStarted ){
             updatePacmanList()
             pacmanName.set(pName)
             pacmanId.set(Utils.genRandomId())
@@ -54,9 +85,9 @@
         }
 	}
 
-    let interval: any;
+    let intervalPacmanList: any;
     function updatePacmanList(){
-        interval = setInterval(() => {
+        intervalPacmanList = setInterval(() => {
             if($globalState != null){
                 pacmanList = Array.from($globalState.getPacmansList())
                 pacmanList = pacmanList // for svelte reactivity
@@ -65,28 +96,16 @@
     }
 
     function startGame(){
-        clearInterval(interval)
+        clearInterval(intervalPacmanList)
 	    gameState.set("game_started", true)
         $globalState.setCurrentPacmanPlaying(true)
         pressStart = false
-        isAllready()
-    }
-
-    function isAllready(){
-        interval = setInterval(() => {
-            if($globalState != null){
-                hideMenu = $globalState.checkIfAllPlaying()
-                if(hideMenu){
-                    clearInterval(interval)
-                }
-            }
-        }, 300)
     }
 
 </script>
 
 {#if !hideMenu}
-    <div class="init" transition:slide={{delay: 200, duration: 600, easing: quintInOut }}>
+    <div class="init" transition:slide={{delay: 200, duration: 700, easing: quintInOut }}>
         <img src="./img/pacman_logo.png" alt="pacman logo">
         {#if errorGameStarted}
             <div style="height:50px;"/>
@@ -107,9 +126,28 @@
             <h1>Players</h1>
             <div class="pacman-list">
                 {#each pacmanList as pacman}
-                    <div class="pacman-name">
-                        • {pacman.name}
-                        {#if $pacmanId == pacman.id}(YOU){/if}
+                    <div class="text-box">
+                        {pacman.name} {#if $pacmanId == pacman.id}(YOU){/if}
+                    </div>
+                {/each}
+            </div>
+        {:else if gameEnded}
+            <div style="height:20px;"/>
+            <h1>YOU WON</h1>
+            <div style="height:30px;"/>
+            <h1>HIGH SCORES</h1>
+            <div class="pacman-list">
+                {#each pacmanList as pacman}
+                    <div class="list-row">
+                        <div class="text-box">
+                           1ST
+                        </div>
+                        <div class="text-box">
+                            {pacman.name} {#if $pacmanId == pacman.id}(YOU){/if}
+                        </div>
+                        <div class="text-box">
+                            {$globalState.getScore(pacman)}
+                        </div>
                     </div>
                 {/each}
             </div>
@@ -142,6 +180,9 @@
     .pacman-list {
         width: 100%;
         overflow-y: scroll;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
     }
 
     h1 {
@@ -150,11 +191,19 @@
         font-size: clamp(16px, 3vw, 30px);
     }
 
-    .pacman-name {
+    .text-box {
         margin-top: 10px;
         margin-bottom: 10px;
         text-align: center;
         font-size: clamp(12px, 2vw, 26px);
+    }
+
+    .list-row {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+        width: min(50%, 700px);
     }
     
     .game-start {
