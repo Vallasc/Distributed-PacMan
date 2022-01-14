@@ -7,9 +7,9 @@
     import { pacmanName } from '../store.js'
 	import { onDestroy } from 'svelte'
 
-	const version = "version 0.1.6"
+	const version = "1.1.6"
 
-	console.log(version)
+	console.log("version " + version)
 
 	onDestroy(()=>{
 		provider.disconnect()
