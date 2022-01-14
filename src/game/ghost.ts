@@ -12,11 +12,9 @@ export class Ghost {
     static readonly GHOST_SPEED = 2
     //static readonly GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.1
     static loadedGeometry: BufferGeometry
-    static readonly GHOST_MATERIAL = new THREE.MeshBasicMaterial({ color: 'red', side: THREE.DoubleSide })
-    static readonly OTHER_GHOST_MATERIAL = new THREE.MeshBasicMaterial({ color: 'green', side: THREE.DoubleSide })
+    static readonly OTHER_GHOST_MATERIAL = new THREE.MeshPhongMaterial({ color: 'green', side: THREE.DoubleSide })
 
-
-
+    public color: THREE.ColorRepresentation
     public initialPosition: THREE.Vector3
     public pacmanTarget: string // Pacman Id
     public positionTarget: THREE.Vector3
@@ -26,7 +24,7 @@ export class Ghost {
     public id: string
     public exitHome: boolean
 
-    constructor(id: string, position: THREE.Vector3, afterLoading: () => void = ()=>{}){
+    constructor(id: string, position: THREE.Vector3, color: THREE.ColorRepresentation, afterLoading: () => void = ()=>{}){
         if(Ghost.loadedGeometry == null){
             let stlLoader = new STLLoader()
             let self = this
@@ -34,7 +32,7 @@ export class Ghost {
                 'misc/ghost.stl',
                 (geometry) => {
                     Ghost.loadedGeometry = geometry
-                    self.makeMesh(position)
+                    self.makeMesh(position, color)
                     afterLoading()
                 },
                 (xhr) => {},
@@ -43,9 +41,10 @@ export class Ghost {
                 }
             ) 
         } else {
-            this.makeMesh(position)
+            this.makeMesh(position, color)
             afterLoading()
         }
+        this.color = color
         this.id = id
         this.direction = new THREE.Vector3(-1, 0, 0)
         this.state = 0
@@ -55,10 +54,10 @@ export class Ghost {
     }
 
     // Make 3d mesh
-    public makeMesh(position: THREE.Vector3) {
-        let dotMaterial = Ghost.GHOST_MATERIAL
+    public makeMesh(position: THREE.Vector3, color: THREE.ColorRepresentation) {
+        let ghostMaterial = new THREE.MeshPhongMaterial({ color: color, side: THREE.DoubleSide })
         //dotMaterial.flatShading = false
-        this.mesh = new Mesh(Ghost.loadedGeometry, dotMaterial)
+        this.mesh = new Mesh(Ghost.loadedGeometry, ghostMaterial)
         this.mesh.geometry.computeVertexNormals()
         this.mesh.position.set(position.x, position.y, position.z + Ghost.Z_OFFSET)
         this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
@@ -149,6 +148,7 @@ export class Ghost {
         let obj: any = {}
         obj["id"] = this.id
         obj["position"] = [ this.mesh.position.x, this.mesh.position.y, this.mesh.position.z]
+        obj["color"] = this.color
         obj["direction"] = [ this.direction.x, this.direction.y, this.direction.z]
         obj["initialPosition"] = [ this.initialPosition.x, this.initialPosition.y, this.initialPosition.z]
         obj["pacmanTarget"] = this.pacmanTarget
@@ -160,7 +160,7 @@ export class Ghost {
     // New ghost from plain js object
     public static fromObj(obj: any): Ghost {
         let position = new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2])
-        let out = new Ghost(obj["id"], position)
+        let out = new Ghost(obj["id"], position, obj["color"])
         out.copyObj(obj)
         return out
     }
