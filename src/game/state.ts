@@ -20,7 +20,8 @@ export class GameState {
     private dotsShared: Y.Map<string> // Shared Map<dot_id, pacman_id>
     private dotsMap: any
 
-    private currentPacman: Pacman
+    public currentPacman: Pacman
+    public currentPacmanScore: number
 
     constructor(ydoc: Y.Doc){        
         this.ydoc = ydoc
@@ -36,6 +37,7 @@ export class GameState {
 
         //this.pacmanDelIndex = 0
         this.currentPacman = null
+        this.currentPacmanScore = 0
     }
 
     public setCurrentPacman(currentPacman: Pacman){
@@ -49,7 +51,6 @@ export class GameState {
                 if(this.currentPacman && this.currentPacman.id != pLocal.id){
                     // Update pacman object
                     pLocal.copyObjIfSameId(value)
-                    //pLocal.deletedFlag = this.pacmanDelIndex
                 }
             } else { 
                 // Add new pacman object
@@ -76,16 +77,15 @@ export class GameState {
     public updateGhostsLocal() {
         this.ghostsShared.forEach( (value: Object, key: string) => {
             let gLocal = this.ghostsLocal.get(key)
-            if(gLocal && gLocal.pacmanTarget != this.currentPacman.id)
+            if(gLocal){
                 gLocal.copyObj(value)
+            }
         })
     }
 
     public updateGhostsShared() {
-        this.ydoc.transact(()=>{
-            this.ghostsLocal.forEach((ghost)=>{
-                this.ghostsShared.set(ghost.id, ghost.toPlainObj())
-            })
+        this.ghostsLocal.forEach((ghost)=>{
+            this.ghostsShared.set(ghost.id, ghost.toPlainObj())
         })
     }
 
@@ -99,12 +99,15 @@ export class GameState {
     }
 
     public updateDotsLocal() {
+        this.currentPacmanScore = 0
         for (const y in this.dotsMap) {
             for (const x in this.dotsMap[y]) {
                 let dot: Dot = this.dotsMap[y][x]
                 let pacmanId = this.dotsShared.get(dot.id)
                 if( pacmanId ){
                     dot.setVisible(false)
+                    if(pacmanId === this.currentPacman.id)
+                        this.currentPacmanScore += 100
                 } else {
                     dot.setVisible(true)
                 }
@@ -141,7 +144,7 @@ export class GameState {
     public checkIfAllPlaying(): boolean {
         let out = true
         this.pacmansShared.forEach( (value: Object, key: string) => {
-            if(!value["isPlaying"] && value["isOnline"]) 
+            if(!value["isPlaying"] && value["isOnline"])
                 out = false
         })
         return out
@@ -150,5 +153,22 @@ export class GameState {
     public setCurrentPacmanPlaying(value: boolean) {
         this.currentPacman.isPlaying = value
         this.setPacman(this.currentPacman)
+    }
+
+    public getScore(pacman: Pacman = this.currentPacman): number {
+        if(pacman == this.currentPacman)
+            return this.currentPacmanScore
+            
+        let score: number = 0
+        for (const y in this.dotsMap) {
+            for (const x in this.dotsMap[y]) {
+                let dot: Dot = this.dotsMap[y][x]
+                let pacmanId = this.dotsShared.get(dot.id)
+                if( pacmanId === pacman.id ){
+                    score += 100
+                }
+            }
+        }
+        return score
     }
 }
