@@ -19,6 +19,7 @@ export class GameState {
 
     public currentPacman: Pacman
     public currentPacmanScore: number
+    public allPacmanDied: boolean
 
     public dotsNumber: number
     public dotsEaten: number
@@ -45,6 +46,7 @@ export class GameState {
     }
     
     public updatePacmanLocal(scene: THREE.Scene) {
+        this.allPacmanDied = true;
         this.pacmansShared.forEach( (value: Object, key: string) => {
             let pLocal = this.pacmansLocal.get(key)
             if(pLocal != null) {
@@ -54,12 +56,13 @@ export class GameState {
                 }
             } else { 
                 // Add new pacman object
-                let pacman = Pacman.fromObj(value)
-                pacman.makeTextNick()
-                this.pacmansLocal.set(key, pacman)
+                pLocal = Pacman.fromObj(value)
+                pLocal.makeTextNick()
+                this.pacmansLocal.set(key, pLocal)
                 // Add pacman to scene
-                pacman.addToScene(scene, this.currentPacman)
+                pLocal.addToScene(scene, this.currentPacman)
             }
+            this.allPacmanDied = this.allPacmanDied && (pLocal.nLives == 0 || !pLocal.isOnline) 
         })
 
     }
@@ -155,11 +158,8 @@ export class GameState {
     }
 
     public checkGameEnded(): boolean {
-        let allPacmanDied = true
-        for(let p of this.getPacmansList()){
-            allPacmanDied = allPacmanDied && (p.nLives == 0 || !p.isOnline) 
-        }
-        return allPacmanDied || (this.dotsEaten == this.dotsNumber)
+        return this.allPacmanDied || (this.dotsEaten == this.dotsNumber)
+        //return this.allPacmanDied || (this.dotsEaten == 5)
     }
 
     public setCurrentPacmanPlaying(value: boolean) {

@@ -4,12 +4,14 @@
     import { quintInOut } from 'svelte/easing'
     import { pacmanName, pacmanId, globalState } from '../store.js'
     import { Utils } from '../game/utils.js'
-    import { Pacman } from '../game/pacman.js'
+    import type { Pacman } from '../game/pacman.js'
     import Loading from './Loading.svelte'
     import type { WebrtcProvider } from 'y-webrtc'
 
     export let ydoc: Y.Doc
     export let provider: WebrtcProvider
+
+    const gameEndAudio = new Audio("./audio/intermission.mp3")
 
     // States
     // Show game screen if all other players are ready
@@ -56,15 +58,20 @@
                         calcScores()
                         provider.disconnect()
                         clearInterval(mainInterval)
-                        setTimeout(() => {
-                            hideMenu = false
-                        }, Pacman.TIME_AFTER_DIE)
+
+                        hideMenu = false
+                        // you win
+                        if(scores[0][0].id == $pacmanId){
+                            gameEndAudio.play()
+                        } /*else {
+                            setTimeout(() => {
+                                hideMenu = false
+                            }, Pacman.TIME_AFTER_DIE)
+                        }*/
                     }
                 }
             }
-
 		}
-
 	}, 1000)
 
     function calcScores(){
@@ -73,7 +80,7 @@
             let score = $globalState.getScore(p)
             scores.push([p, score])
         }
-        scores.sort((p1, p2) => p1[1] - p2[1] )
+        scores.sort((p1, p2) => p2[1] - p1[1] )
         scores = scores // for svelte
     }
 
@@ -115,7 +122,7 @@
 </script>
 
 {#if !hideMenu}
-    <div class="init" transition:slide={{delay: 200, duration: 700, easing: quintInOut }}>
+    <div class="init" transition:slide={{delay: 0, duration: 700, easing: quintInOut }}>
         <img src="./img/pacman_logo.png" alt="pacman logo">
         {#if errorGameStarted}
             <div style="height:50px;"/>
@@ -130,7 +137,7 @@
                 <button class="game-start" >GO</button>
             </form>
         {:else if pressStart}
-            <div style="height:20px;"/>
+            <div style="height:30px;"/>
             <button on:click={()=>{startGame()}} class="game-start">START GAME</button>
             <div style="height:30px;"/>
             <h1>Players</h1>
@@ -142,15 +149,19 @@
                 {/each}
             </div>
         {:else if gameEnded}
-            <div style="height:20px;"/>
-            <h1>YOU WON</h1>
+            <div style="height:30px;"/>
+            {#if scores[0][0].id == $pacmanId}
+                <h1>YOU WON</h1>
+            {:else}
+                <h1>YOU LOST</h1>
+            {/if}
             <div style="height:30px;"/>
             <h1>HIGH SCORES</h1>
             <div class="pacman-list">
-                {#each scores as pacman}
+                {#each scores as pacman, i}
                     <div class="list-row">
                         <div class="text-box">
-                           1ST
+                           {i+1}ST
                         </div>
                         <div class="text-box">
                             {pacman[0].name} {#if $pacmanId == pacman[0].id}(YOU){/if}

@@ -117,6 +117,8 @@
         score = state.getScore()
         lives = pacman.nLives
         frameCounter++
+
+        return state.checkGameEnded() && isGameStarted
     })
 
     /*setInterval(()=>{

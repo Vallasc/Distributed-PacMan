@@ -68,10 +68,11 @@ export class Game {
             // Keep track of how many seconds of animation has passed.
             animationSeconds += animationDelta
 
-            callback(animationDelta, animationSeconds)
+            let ret = callback(animationDelta, animationSeconds)
 
-            requestAnimationFrame(render)
-            //setTimeout(render, 0)
+            if(!ret)
+                requestAnimationFrame(render)
+                //setTimeout(render, 0)
         }
         requestAnimationFrame(render)
         //setTimeout(render, 0)
