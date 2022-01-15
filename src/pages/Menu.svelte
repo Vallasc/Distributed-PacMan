@@ -20,6 +20,7 @@
 
     let pName: string
     let pacmanList: Array<Pacman> = new Array<Pacman>()
+    let scores: Array<[Pacman, number]> = new Array<[Pacman, number]>()
 
     // Update game state
 	let gameState: Y.Map<any> = ydoc.getMap('game_state')
@@ -52,8 +53,7 @@
                     gameEnded = $globalState.checkGameEnded()
                     if(gameEnded){
                         console.log("Game Ended")
-                        pacmanList = Array.from($globalState.getPacmansList())
-                        pacmanList = pacmanList // for svelte reactivity
+                        calcScores()
                         provider.disconnect()
                         clearInterval(mainInterval)
                         setTimeout(() => {
@@ -66,6 +66,16 @@
 		}
 
 	}, 1000)
+
+    function calcScores(){
+        scores.length = 0
+        for(let p of $globalState.getPacmansList()){
+            let score = $globalState.getScore(p)
+            scores.push([p, score])
+        }
+        scores.sort((p1, p2) => p1[1] - p2[1] )
+        scores = scores // for svelte
+    }
 
     function closeConnection(){
         errorGameStarted = true
@@ -137,16 +147,16 @@
             <div style="height:30px;"/>
             <h1>HIGH SCORES</h1>
             <div class="pacman-list">
-                {#each pacmanList as pacman}
+                {#each scores as pacman}
                     <div class="list-row">
                         <div class="text-box">
                            1ST
                         </div>
                         <div class="text-box">
-                            {pacman.name} {#if $pacmanId == pacman.id}(YOU){/if}
+                            {pacman[0].name} {#if $pacmanId == pacman[0].id}(YOU){/if}
                         </div>
                         <div class="text-box">
-                            {$globalState.getScore(pacman)}
+                            {pacman[1]}
                         </div>
                     </div>
                 {/each}

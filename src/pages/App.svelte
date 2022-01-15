@@ -7,7 +7,7 @@
     import { pacmanName } from '../store.js'
 	import { onDestroy } from 'svelte'
 
-	const version = "1.1.6"
+	const version = "1.1.6" // TODO check if other have same version
 
 	console.log("version " + version)
 
