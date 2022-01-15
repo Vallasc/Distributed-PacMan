@@ -4,7 +4,7 @@
     import { quintInOut } from 'svelte/easing'
     import { pacmanName, pacmanId, globalState } from '../store.js'
     import { Utils } from '../game/utils.js'
-    import type { Pacman } from '../game/pacman.js'
+    import { Pacman } from '../game/pacman.js'
     import Loading from './Loading.svelte'
     import type { WebrtcProvider } from 'y-webrtc'
 
@@ -59,15 +59,15 @@
                         provider.disconnect()
                         clearInterval(mainInterval)
 
-                        hideMenu = false
                         // you win
-                        if(scores[0][0].id == $pacmanId){
+                        if(scores[0][0].id == $pacmanId && scores.length > 1){
+                            hideMenu = false
                             gameEndAudio.play()
-                        } /*else {
+                        } else {
                             setTimeout(() => {
                                 hideMenu = false
-                            }, Pacman.TIME_AFTER_DIE)
-                        }*/
+                            }, Pacman.TIME_AFTER_DIE / 2)
+                        }
                     }
                 }
             }
@@ -150,7 +150,7 @@
             </div>
         {:else if gameEnded}
             <div style="height:30px;"/>
-            {#if scores[0][0].id == $pacmanId}
+            {#if scores[0][0].id == $pacmanId && scores.length > 1}
                 <h1>YOU WON</h1>
             {:else}
                 <h1>YOU LOST</h1>
@@ -161,7 +161,9 @@
                 {#each scores as pacman, i}
                     <div class="list-row">
                         <div class="text-box">
-                           {i+1}ST
+                           {i == 0 ? (i+1) + "ST" : 
+                            i == 1 ? (i+1) + "ND" : 
+                            i == 2 ? (i+1) + "RD" : (i+1) + "TH"}
                         </div>
                         <div class="text-box">
                             {pacman[0].name} {#if $pacmanId == pacman[0].id}(YOU){/if}
