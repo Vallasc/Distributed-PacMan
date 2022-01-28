@@ -43481,15 +43481,15 @@ var app = (function () {
     			if (!src_url_equal(img.src, img_src_value = "./img/pacman_logo.png")) attr_dev(img, "src", img_src_value);
     			attr_dev(img, "alt", "pacman logo");
     			attr_dev(img, "class", "svelte-1qbtuyq");
-    			add_location(img, file$1, 122, 8, 3824);
+    			add_location(img, file$1, 122, 8, 3852);
     			set_style(div0, "flex", "1");
-    			add_location(div0, file$1, 178, 8, 6163);
+    			add_location(div0, file$1, 178, 8, 6191);
     			attr_dev(div1, "class", "credits svelte-1qbtuyq");
-    			add_location(div1, file$1, 179, 8, 6195);
+    			add_location(div1, file$1, 179, 8, 6223);
     			attr_dev(div2, "class", "init svelte-1qbtuyq");
     			set_style(div2, "width", /*wWidth*/ ctx[8] + "px");
     			set_style(div2, "height", /*wHeight*/ ctx[9] + "px");
-    			add_location(div2, file$1, 119, 4, 3648);
+    			add_location(div2, file$1, 119, 4, 3676);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div2, anchor);
@@ -43613,9 +43613,9 @@ var app = (function () {
     			t2 = space();
     			create_component(loading.$$.fragment);
     			set_style(div, "height", "50px");
-    			add_location(div, file$1, 174, 12, 6034);
+    			add_location(div, file$1, 174, 12, 6062);
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 175, 12, 6075);
+    			add_location(h1, file$1, 175, 12, 6103);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -43699,13 +43699,13 @@ var app = (function () {
     			}
 
     			set_style(div0, "height", "30px");
-    			add_location(div0, file$1, 148, 12, 4978);
+    			add_location(div0, file$1, 148, 12, 5006);
     			set_style(div1, "height", "30px");
-    			add_location(div1, file$1, 154, 12, 5197);
+    			add_location(div1, file$1, 154, 12, 5225);
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 155, 12, 5238);
+    			add_location(h1, file$1, 155, 12, 5266);
     			attr_dev(div2, "class", "pacman-list svelte-1qbtuyq");
-    			add_location(div2, file$1, 156, 12, 5272);
+    			add_location(div2, file$1, 156, 12, 5300);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div0, anchor);
@@ -43824,15 +43824,15 @@ var app = (function () {
     			}
 
     			set_style(div0, "height", "30px");
-    			add_location(div0, file$1, 136, 12, 4467);
+    			add_location(div0, file$1, 136, 12, 4495);
     			attr_dev(button, "class", "game-start svelte-1qbtuyq");
-    			add_location(button, file$1, 137, 12, 4508);
+    			add_location(button, file$1, 137, 12, 4536);
     			set_style(div1, "height", "30px");
-    			add_location(div1, file$1, 138, 12, 4597);
+    			add_location(div1, file$1, 138, 12, 4625);
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 139, 12, 4638);
+    			add_location(h1, file$1, 139, 12, 4666);
     			attr_dev(div2, "class", "pacman-list svelte-1qbtuyq");
-    			add_location(div2, file$1, 140, 12, 4668);
+    			add_location(div2, file$1, 140, 12, 4696);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div0, anchor);
@@ -43938,20 +43938,20 @@ var app = (function () {
     			button = element("button");
     			button.textContent = "GO";
     			set_style(div0, "height", "40px");
-    			add_location(div0, file$1, 128, 12, 4075);
+    			add_location(div0, file$1, 128, 12, 4103);
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 129, 12, 4116);
+    			add_location(h1, file$1, 129, 12, 4144);
     			attr_dev(input, "type", "text");
     			attr_dev(input, "maxlength", "10");
     			attr_dev(input, "minlength", "2");
     			attr_dev(input, "class", "svelte-1qbtuyq");
-    			add_location(input, file$1, 131, 16, 4232);
+    			add_location(input, file$1, 131, 16, 4260);
     			set_style(div1, "width", "10px");
-    			add_location(div1, file$1, 132, 16, 4318);
+    			add_location(div1, file$1, 132, 16, 4346);
     			attr_dev(button, "class", "game-start svelte-1qbtuyq");
-    			add_location(button, file$1, 133, 16, 4362);
+    			add_location(button, file$1, 133, 16, 4390);
     			attr_dev(form, "class", "nick-insert svelte-1qbtuyq");
-    			add_location(form, file$1, 130, 12, 4159);
+    			add_location(form, file$1, 130, 12, 4187);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div0, anchor);
@@ -44022,10 +44022,10 @@ var app = (function () {
     			h3 = element("h3");
     			h3.textContent = "Try another time";
     			set_style(div, "height", "50px");
-    			add_location(div, file$1, 124, 12, 3921);
+    			add_location(div, file$1, 124, 12, 3949);
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 125, 12, 3962);
-    			add_location(h3, file$1, 126, 12, 4005);
+    			add_location(h1, file$1, 125, 12, 3990);
+    			add_location(h3, file$1, 126, 12, 4033);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -44066,7 +44066,7 @@ var app = (function () {
     			h1 = element("h1");
     			h1.textContent = "YOU LOST";
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 152, 16, 5147);
+    			add_location(h1, file$1, 152, 16, 5175);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, h1, anchor);
@@ -44096,7 +44096,7 @@ var app = (function () {
     			h1 = element("h1");
     			h1.textContent = "YOU WON";
     			attr_dev(h1, "class", "svelte-1qbtuyq");
-    			add_location(h1, file$1, 150, 16, 5092);
+    			add_location(h1, file$1, 150, 16, 5120);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, h1, anchor);
@@ -44185,13 +44185,13 @@ var app = (function () {
     			t5 = text(t5_value);
     			t6 = space();
     			attr_dev(div0, "class", "text-box svelte-1qbtuyq");
-    			add_location(div0, file$1, 159, 24, 5412);
+    			add_location(div0, file$1, 159, 24, 5440);
     			attr_dev(div1, "class", "text-box svelte-1qbtuyq");
-    			add_location(div1, file$1, 164, 24, 5667);
+    			add_location(div1, file$1, 164, 24, 5695);
     			attr_dev(div2, "class", "text-box svelte-1qbtuyq");
-    			add_location(div2, file$1, 167, 24, 5835);
+    			add_location(div2, file$1, 167, 24, 5863);
     			attr_dev(div3, "class", "list-row svelte-1qbtuyq");
-    			add_location(div3, file$1, 158, 20, 5364);
+    			add_location(div3, file$1, 158, 20, 5392);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div3, anchor);
@@ -44284,7 +44284,7 @@ var app = (function () {
     			if (if_block) if_block.c();
     			t2 = space();
     			attr_dev(div, "class", "text-box svelte-1qbtuyq");
-    			add_location(div, file$1, 142, 20, 4761);
+    			add_location(div, file$1, 142, 20, 4789);
     		},
     		m: function mount(target, anchor) {
     			insert_dev(target, div, anchor);
@@ -44425,7 +44425,7 @@ var app = (function () {
 
     	// Close connection when a tab loose focus
     	document.onvisibilitychange = () => {
-    		if (document.visibilityState === "hidden") {
+    		if (document.visibilityState === "hidden" && gameStarted && !hideMenu) {
     			closeConnection();
     			$$invalidate(0, hideMenu = false);
     			if ($globalState != null) $globalState.setGameEnded(true);
