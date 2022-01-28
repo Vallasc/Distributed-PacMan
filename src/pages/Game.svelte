@@ -6,83 +6,87 @@
     import { Pacman } from '../game/pacman'
     import { GameState } from '../game/state'
     import { pacmanName, pacmanId, globalState } from '../store'
-    import { onDestroy } from 'svelte'
     import type { WebrtcProvider } from 'y-webrtc'
     import { KeyState } from '../game/keyboard';
+    import { GlobalConfig } from '../game/global_config';
     
     export let ydoc: Y.Doc
-    export let provider: WebrtcProvider
 
     console.log("Game created")
 
-    onDestroy(() => {
-        document.body.removeChild(renderer.domElement)
-    })
-
-    provider.awareness.on("change", ()=>{
-		console.log( Array.from(provider.awareness.getStates().keys()))
-	})
-
     const gameStartAudio = new Audio("./audio/game_start.mp3")
+
     let score = 0
     let lives = 3
 
-    let game = new Game()
     let keys = new KeyState()
+    let state = new GameState(ydoc)
+
+    let game = new Game()
     let renderer = game.createRenderer()
     let scene = game.createScene()
-    
-    let state = new GameState(ydoc)
-    let map = new World(scene, state)
-    let pacman =  new Pacman($pacmanId, $pacmanName, provider.awareness.clientID, map.pacmanSpawn)
-    state.setCurrentPacman(pacman)
     globalState.set(state)
+
+    let map = new World(scene, state)
+    let pacman =  new Pacman($pacmanId, $pacmanName)
+    state.setCurrentPacman(pacman)
     pacman.addToScene(scene, pacman)
     
     let camera = new Camera(renderer, pacman)
     let hudCamera = new HUDCamera(map)
     
     let frameCounter = 0
-    let recomputeGhostTargetFrame = 60 + Math.floor(Math.random() * 60)
-
+    let recomputeGhostTargetFrame = Math.floor(Math.random() * 60)
     let isGameStarted = false
+
+    let scatterTimer
 
     let interval = setInterval(() => {
         let started = state.checkIfAllPlaying()
         if(started) {
+            let pId = state.getPacmanIndex(pacman)
+            pacman.setPosition(map.pacmanSpawn[pId])
             clearInterval(interval)
             gameStartAudio.play()
-            setTimeout( () => isGameStarted = true, 4000 )
+            setTimeout( () => isGameStarted = true, GlobalConfig.START_TIME )
         }
     }, 100)
 
 
     // Main game loop
     game.gameLoop( (delta, now) => {
-
-        // Update local state
-        state.updatePacmanLocal(scene)
-        state.updateGhostsLocal()
-        state.updateDotsLocal()
-
-        if(isGameStarted && pacman.isAlive){
-            pacman.move(delta, keys, map)
-            pacman.eatDot(state)
-        }
-        // Update other pacman frames
-        for( let p of state.getPacmansList()){
-            p.update(pacman, now)
-        }
-        // Update pacam camera
-        camera.updateCamera(delta, !pacman.isAlive)
-
         ydoc.transact(()=>{
-            // Set current pacman state
-            state.setPacman(pacman)
+            // Update local state
+            state.updatePacmanLocal(scene)
+            state.updateGhostsLocal()
+            state.updateDotsLocal()
+
+            if(state.isPowerDotEaten()){
+                console.log("SCATTER MODE")
+                state.setScatterMode(true)
+                clearTimeout(scatterTimer)
+                scatterTimer = setTimeout( () => {
+                    state.setScatterMode(false)
+                }, GlobalConfig.SCATTER_TIME )
+            }
+
+            let scatterMode = state.getScatterMode()
+
+            if(isGameStarted && pacman.isAlive){
+                pacman.move(delta, keys, map)
+                pacman.eatDot(state)
+            }
+
+            // Update other pacman frames
+            for( let p of state.getPacmansList()){
+                p.update(pacman, now)
+            }
+            // Update pacam camera
+            camera.updateCamera(delta, !pacman.isAlive)
 
             // Check offline clients
             if(frameCounter % 60 == 0){
-                game.checkOfflinePacmans(provider, state)
+                game.checkOfflinePacmans(state)
             }
             // Compute target for necessary ghosts
             if(frameCounter % recomputeGhostTargetFrame == 0){
@@ -92,19 +96,27 @@
             // Update ghosts position
             if(isGameStarted){
                 for( let g of state.getGhosts()) {
+                    g.updateMaterial(scatterMode, state)
+                    // Update only ghosts that are mine
                     if(g.pacmanTarget && g.pacmanTarget == pacman.id) {
-                        //g.mesh.material = Ghost.OTHER_GHOST_MATERIAL
-                        g.move(delta, map, state)
+                        g.move(delta, map, pacman, scatterMode)
                         state.setGhost(g)
-                    } else {
-                        //g.mesh.material = Ghost.GHOST_MATERIAL
                     }
                     
                     // Mitigates the delay caused by a bad internet connection
-                    game.moveFakeGhost(g, delta, map)
-                    pacman.checkGhostCollision(g, now)
+                    //game.moveFakeGhost(g, delta, map)
+                    if(!state.checkGameEnded()){
+                        pacman.checkGhostCollision(g, state)
+                        g.playAudio(pacman, scatterMode)
+                    }
                 }
             }
+
+            // Current pacman is online
+            pacman.isOnline = true
+            pacman.clock = frameCounter
+            // Set current pacman state
+            state.setPacman(pacman)
         })
 
         // Render main view
@@ -118,7 +130,7 @@
         lives = pacman.nLives
         frameCounter++
 
-        return state.checkGameEnded() && isGameStarted
+        return /*state.checkGameEnded() && isGameStarted*/ false
     })
 
     /*setInterval(()=>{
@@ -153,7 +165,7 @@
 <style>
     .score-box {
         position: absolute;
-        padding: 14px;
+        padding: 8px;
         right: 10px;
         top: 10px;
         background-color: #000000d6;
@@ -164,15 +176,18 @@
         align-content: center;
         justify-content: space-around;
         align-items: center;
-        font-size: 20px;
         border-radius: 16px;
         border-color: #FFF;
-        border-width: 5px;
+        border-width: 4px;
         border-style: solid;
     }
 
     .element {
-        padding: 8px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        padding-left: 10px;
+        padding-right: 10px;
         text-align: center;
+        font-size: clamp(12px, 2vw, 26px);
     }
 </style>
