@@ -40,6 +40,7 @@
     let isGameStarted = false
 
     let scatterTimer
+    let lastScatterMode = false
 
     let interval = setInterval(() => {
         let started = state.checkIfAllPlaying()
@@ -64,13 +65,16 @@
             if(state.isPowerDotEaten()){
                 console.log("SCATTER MODE")
                 state.setScatterMode(true)
+            }
+
+            let scatterMode = state.getScatterMode()
+            if( scatterMode && !lastScatterMode ){
                 clearTimeout(scatterTimer)
                 scatterTimer = setTimeout( () => {
                     state.setScatterMode(false)
                 }, GlobalConfig.SCATTER_TIME )
             }
-
-            let scatterMode = state.getScatterMode()
+            lastScatterMode = scatterMode
 
             if(isGameStarted && pacman.isAlive){
                 pacman.move(delta, keys, map)
