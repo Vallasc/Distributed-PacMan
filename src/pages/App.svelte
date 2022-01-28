@@ -6,8 +6,10 @@
 	import * as Y from 'yjs'
     import { pacmanName } from '../store.js'
 	import { onDestroy } from 'svelte'
+	import { GlobalConfig } from '../game/global_config';
+	import { Utils } from '../game/utils';
 
-	const version = "1.1.6" // TODO check if other have same version
+	const version = "1.5.6"
 
 	console.log("version " + version)
 
@@ -15,23 +17,33 @@
 		provider.disconnect()
 	})
 
+	const urlParams = new URLSearchParams(window.location.search)
+    let roomId = urlParams.get("room");
+	if( roomId == null ) {
+		roomId = Utils.getRandomString()
+		//urlParams.set("room", roomId)
+		window.history.pushState(null, null, "?room=" + roomId)
+	}
+	console.log("Room id: " + roomId)
+
 	const garbageCollector = true
 	const ydoc: Y.Doc = new Y.Doc({gc: garbageCollector})
 	const awareness = new awarenessProtocol.Awareness(ydoc)
-	const provider: WebrtcProvider = new WebrtcProvider( 'distribuited-pacman', ydoc, {
+	// Disable awareness
+	awareness.destroy()
+	const provider: WebrtcProvider = new WebrtcProvider( 'distribuited_pacman_' + roomId, ydoc, {
 		signaling: ['wss://signaling.yjs.dev'],
 		password: null,
 		awareness: awareness,
-		maxConns: 10,
+		maxConns: GlobalConfig.MAX_PLAYERS,
 		filterBcConns: true,
 		peerOpts: {}
 	})
 
-
 </script>
 
 {#if $pacmanName != ""}
-	<Game {ydoc} {provider}></Game>
+	<Game {ydoc}></Game>
 {/if}
 <Menu {ydoc} {provider}></Menu>
 
