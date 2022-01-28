@@ -33,7 +33,7 @@
 
     // Close connection when a tab loose focus
     document.onvisibilitychange = () => {
-        if (document.visibilityState === "hidden" && gameStarted && !hideMenu) {
+        if (document.visibilityState === "hidden" && gameStarted && !gameEnded) {
             closeConnection()
             hideMenu = false
             if( $globalState != null )
