@@ -2,9 +2,9 @@
     import type * as Y from 'yjs'
     import { slide } from 'svelte/transition'
     import { quintInOut } from 'svelte/easing'
-    import { pacmanName, pacmanId, globalState } from '../store.js'
-    import { Utils } from '../game/utils.js'
-    import { Pacman } from '../game/pacman.js'
+    import { pacmanName, pacmanId, globalState } from '../store'
+    import { Utils } from '../game/utils'
+    import type { Pacman } from '../game/pacman'
     import Loading from './Loading.svelte'
     import type { WebrtcProvider } from 'y-webrtc'
 
@@ -31,6 +31,24 @@
     let gameStarted = false
     let gameEnded = false
 
+    // Close connection when a tab loose focus
+    document.onvisibilitychange = () => {
+        if (document.visibilityState === "hidden") {
+            closeConnection()
+            hideMenu = false
+            if( $globalState != null )
+                $globalState.setGameEnded(true)
+        }
+    }
+
+    let wWidth: number = window.innerWidth
+    let wHeight: number = window.innerHeight
+
+    window.addEventListener("resize", () => {
+        wWidth = window.innerWidth
+        wHeight = window.innerHeight
+    })
+
     let mainInterval = setInterval(() => {
         // Check if game is started
 		let value: boolean = gameState.get("game_started")
@@ -56,18 +74,11 @@
                     if(gameEnded){
                         console.log("Game Ended")
                         calcScores()
-                        provider.disconnect()
                         clearInterval(mainInterval)
 
-                        // you win
-                        if(scores[0][0].id == $pacmanId && scores.length > 1){
-                            hideMenu = false
-                            gameEndAudio.play()
-                        } else {
-                            setTimeout(() => {
-                                hideMenu = false
-                            }, Pacman.TIME_AFTER_DIE / 2)
-                        }
+                        hideMenu = false
+                        provider.disconnect()
+                        gameEndAudio.play()
                     }
                 }
             }
@@ -77,8 +88,10 @@
     function calcScores(){
         scores.length = 0
         for(let p of $globalState.getPacmansList()){
-            let score = $globalState.getScore(p)
-            scores.push([p, score])
+            if(p.isPlaying){
+                let score = $globalState.getScore(p)
+                scores.push([p, score])
+            }
         }
         scores.sort((p1, p2) => p2[1] - p1[1] )
         scores = scores // for svelte
@@ -106,7 +119,11 @@
     function updatePacmanList(){
         intervalPacmanList = setInterval(() => {
             if($globalState != null){
-                pacmanList = Array.from($globalState.getPacmansList())
+                pacmanList = new Array<Pacman>()
+                for(let p of $globalState.getPacmansList()){
+                    if(p.isOnline)
+                        pacmanList.push(p)
+                }
                 pacmanList = pacmanList // for svelte reactivity
             }
         }, 200)
@@ -122,7 +139,9 @@
 </script>
 
 {#if !hideMenu}
-    <div class="init" transition:slide={{delay: 0, duration: 700, easing: quintInOut }}>
+    <div class = "init" 
+        transition:slide={{delay: 400, duration: 700, easing: quintInOut }}
+        style = "width: {wWidth + "px"}; height: {wHeight + "px"}">
         <img src="./img/pacman_logo.png" alt="pacman logo">
         {#if errorGameStarted}
             <div style="height:50px;"/>
@@ -179,6 +198,8 @@
             <h1>Waiting other players</h1>
             <Loading></Loading>
         {/if}
+        <div style="flex:1;"/>
+        <div class="credits">Credits: @Vallac</div>
     </div>
 {/if}
 
@@ -271,5 +292,10 @@
         justify-content: center;
         align-items: center;
         align-content: center;
+    }
+
+    .credits {
+        font-size: clamp(10px, 2vw, 20px);
+        margin-bottom: 24px;
     }
  </style>
