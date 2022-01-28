@@ -98,7 +98,7 @@ export class Ghost {
     public updateMaterial(scatterMode: boolean, state: GameState) {
         if(scatterMode) {
             if(!this.isEaten){
-                if(this.scatterMaterialCounter++ % 30 < 15)
+                if(this.scatterMaterialCounter++ % 20 < 10)
                     this.mesh.material = Ghost.SCATTER_MATERIAL_1
                 else
                     this.mesh.material = Ghost.SCATTER_MATERIAL_2
@@ -142,9 +142,6 @@ export class Ghost {
     public move(delta: number, levelMap: World, pacmanTarget: Pacman, scatterMode: boolean) {
         if(!this.pacmanTarget || this.pacmanTarget != pacmanTarget.id) return
 
-        if(this.exitHome && Utils.distance(this.mesh.position, levelMap.exitGhostTarget) < 1)
-            this.exitHome = false
-
         if(this.exitHome && !scatterMode) {
             this.positionTarget = levelMap.exitGhostTarget
         } else if(scatterMode) {
@@ -153,6 +150,9 @@ export class Ghost {
         } else {
             this.positionTarget = pacmanTarget.mesh.position
         }
+
+        if(this.exitHome && Utils.distance(this.mesh.position, levelMap.exitGhostTarget) < 1)
+            this.exitHome = false
 
         let previousPosition = new THREE.Vector3().copy(this.mesh.position).addScaledVector(this.direction, 0.5).round()
         let ghostSpeed = this.isEaten ? Ghost.GHOST_SPEED_EATEN : Ghost.GHOST_SPEED
