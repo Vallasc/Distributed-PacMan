@@ -8,33 +8,33 @@ export class World {
     static readonly LEVEL = [
         '# # # # # # # # # # # # # # # # # # # # # # # # # # # #',
         '# . . . . . . . . . . . . # # . . . . . . . . . . . . #',
-        '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
+        '# . # # # # P # # # # # . # # . # # # # # P # # # # . #',
         '# o # # # # . # # # # # . # # . # # # # # . # # # # o #',
         '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
         '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
         '# . # # # # . # # . # # # # # # # # . # # . # # # # . #',
         '# . # # # # . # # . # # # # # # # # . # # . # # # # . #',
         '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
-        '# # # # # # . # # # # #   # #   # # # # # . # # # # # #',
+        '# # # # # # P # # # # #   # #   # # # # # P # # # # # #',
         '          # . # # # # #   # #   # # # # # . #          ',
         '          # . # #           T         # # . #          ',
         '          # . # #   # # # X X # # #   # # . #          ',
-        '# # # # # # . # #   #     G   G   #   # # . # # # # # #',
-        '            .       #   G   G     #       .            ',
-        '# # # # # # . # #   #             #   # # . # # # # # #',
-        '          # . # #   # # # # # # # #   # # . #          ',
+        '# # # # # # . # #   #   G     G   #   # # . # # # # # #',
+        '            .       #             #       .            ',
+        '# # # # # # . # #   #   G     G   #   # # . # # # # # #',
+        '          # P # #   # # # # # # # #   # # P #          ',
         '          # . # #                     # # . #          ',
         '          # . # #   # # # # # # # #   # # . #          ',
         '# # # # # # . # #   # # # # # # # #   # # . # # # # # #',
         '# . . . . . . . . . . . . # # . . . . . . . . . . . . #',
         '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
         '# . # # # # . # # # # # . # # . # # # # # . # # # # . #',
-        '# o . . # # . . . . . . . P   . . . . . . . # # . . o #',
+        '# . . . # # P . . . . . . . . . . . . . . P # # . . . #',
         '# # # . # # . # # . # # # # # # # # . # # . # # . # # #',
         '# # # . # # . # # . # # # # # # # # . # # . # # . # # #',
         '# . . . . . . # # . . . . # # . . . . # # . . . . . . #',
         '# . # # # # # # # # # # . # # . # # # # # # # # # # . #',
-        '# . # # # # # # # # # # . # # . # # # # # # # # # # . #',
+        '# o # # # # # # # # # # . # # . # # # # # # # # # # o #',
         '# . . . . . . . . . . . . . . . . . . . . . . . . . . #',
         '# # # # # # # # # # # # # # # # # # # # # # # # # # # #']
 
@@ -47,10 +47,12 @@ export class World {
     public numDots: number
 
     public exitGhostTarget: THREE.Vector3
-    public pacmanSpawn: THREE.Vector3
-    public ghostColors = ["red", "cyan", "pink", "orange"]
+    public ghostHomeTarget: THREE.Vector3
 
-    private map: any
+    public pacmanSpawn: Array<THREE.Vector3>
+    public ghostColors: Array<string> = ["red", "cyan", "pink", "orange"]
+
+    private map: Object
 
 
     constructor(scene: THREE.Scene, state: GameState) {
@@ -61,6 +63,7 @@ export class World {
         this.top = this.left = this.right = 0
         this.numDots = 0
 
+        this.pacmanSpawn = []
         this.map = {}
         let x : number, y : number
         for (let row = 0; row < World.LEVEL.length; row++) {
@@ -103,8 +106,9 @@ export class World {
                     dotId++
                     this.map[y][x] = dot
                 } else if (cell === 'P') {
-                    this.pacmanSpawn = new THREE.Vector3(x, y, 0)
+                    this.pacmanSpawn.push(new THREE.Vector3(x, y, 0))
                 } else if (cell === 'G') {
+                    this.ghostHomeTarget = new THREE.Vector3(x, y, 0)
                     let ghost = new Ghost(ghostId.toString(), new THREE.Vector3(x, y, 0), this.ghostColors[ghostId], ()=>{
                         ghost.addToScene(scene)
                         state.setGhost(ghost)
@@ -170,7 +174,10 @@ class Wall {
 
 export class Dot {
     static readonly DOT_RADIUS = 0.1
-    static readonly DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2
+    static readonly DOT_RADIUS_POWER = Dot.DOT_RADIUS * 3
+
+    static readonly DOT_SCORE = 100
+    static readonly POWER_DOT_SCORE = 200
 
     private mesh: Mesh
     public id: string
