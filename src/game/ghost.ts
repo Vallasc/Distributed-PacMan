@@ -1,7 +1,7 @@
 import type { BufferGeometry } from 'three'
 import * as THREE from 'three'
 import { STLLoader } from 'three/examples/jsm/loaders/STLLoader'
-import type { World } from './world'
+import { Dot, World } from './world'
 import type { Pacman } from './pacman'
 import { Mesh, Utils } from './utils'
 import type { GameState } from './state'
@@ -10,28 +10,38 @@ export class Ghost {
     static readonly GHOST_SCALE = 0.162
     static readonly Z_OFFSET = -0.2
     static readonly GHOST_SPEED = 2
-    //static readonly GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.1
-    static loadedGeometry: BufferGeometry
-    static readonly OTHER_GHOST_MATERIAL = new THREE.MeshPhongMaterial({ color: 'green', side: THREE.DoubleSide })
+    static readonly GHOST_SPEED_EATEN = Ghost.GHOST_SPEED * 2
+    static readonly SCATTER_MATERIAL_1 = new THREE.MeshBasicMaterial({ color: 'white', side: THREE.DoubleSide })
+    static readonly SCATTER_MATERIAL_2 = new THREE.MeshBasicMaterial({ color: 'blue', side: THREE.DoubleSide })
+    static readonly SCATTER_MATERIAL_EAT = new THREE.MeshBasicMaterial({ color: 'white', side: THREE.DoubleSide })
+    static readonly SIREN_DISTANCE = 5
+    static readonly SIREN_AUDIO = new Audio("./audio/siren_1.mp3")
+    static readonly EYES_AUDIO = new Audio("./audio/eyes.mp3")
 
+    static LOADED_GEOMETRY: BufferGeometry
+    static readonly EATEN_GEOMETRY: THREE.SphereGeometry = new THREE.SphereGeometry(Dot.DOT_RADIUS);
+
+    public scatterMaterialCounter: number
+    public material: THREE.MeshPhongMaterial
     public color: THREE.ColorRepresentation
     public initialPosition: THREE.Vector3
     public pacmanTarget: string // Pacman Id
+    public isEaten: boolean
+
     public positionTarget: THREE.Vector3
-    public state: number // chase = 0, frightned = 1, eat = 2
     public direction: THREE.Vector3
     public mesh: Mesh
     public id: string
     public exitHome: boolean
 
     constructor(id: string, position: THREE.Vector3, color: THREE.ColorRepresentation, afterLoading: () => void = ()=>{}){
-        if(Ghost.loadedGeometry == null){
+        if(Ghost.LOADED_GEOMETRY == null){
             let stlLoader = new STLLoader()
             let self = this
             stlLoader.load(
                 'misc/ghost.stl',
                 (geometry) => {
-                    Ghost.loadedGeometry = geometry
+                    Ghost.LOADED_GEOMETRY = geometry
                     self.makeMesh(position, color)
                     afterLoading()
                 },
@@ -47,18 +57,19 @@ export class Ghost {
         this.color = color
         this.id = id
         this.direction = new THREE.Vector3(-1, 0, 0)
-        this.state = 0
         this.pacmanTarget = null
         this.initialPosition = position.clone()
         this.exitHome = true
+        this.scatterMaterialCounter = 0
+        this.isEaten = false
+        Ghost.SIREN_AUDIO.currentTime = 5
+        Ghost.EYES_AUDIO.currentTime = 5
     }
 
     // Make 3d mesh
     public makeMesh(position: THREE.Vector3, color: THREE.ColorRepresentation) {
-        let ghostMaterial = new THREE.MeshPhongMaterial({ color: color, side: THREE.DoubleSide })
-        //dotMaterial.flatShading = false
-        this.mesh = new Mesh(Ghost.loadedGeometry, ghostMaterial)
-        this.mesh.geometry.computeVertexNormals()
+        this.material = new THREE.MeshPhongMaterial({ color: color, side: THREE.DoubleSide })
+        this.mesh = new Mesh(Ghost.LOADED_GEOMETRY, this.material)
         this.mesh.position.set(position.x, position.y, position.z + Ghost.Z_OFFSET)
         this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
         this.mesh.isGhost = true
@@ -79,35 +90,73 @@ export class Ghost {
         scene.add(this.mesh)
     }
 
-    public moveFake(delta: number, levelMap: World) {
-        let currentPosition = new THREE.Vector3().copy(this.mesh.position).addScaledVector(this.direction, 0.5).round()
-        let forwardWall = levelMap.isWall(currentPosition, true)
-        if (!forwardWall) {
-            this.mesh.translateOnAxis(this.direction, delta * Ghost.GHOST_SPEED)
-            levelMap.wrapObject(this.mesh)
+    public setGhostEaten(value: boolean, state: GameState){
+        this.isEaten = value;
+        state.setGhost(this)
+    }
+
+    public updateMaterial(scatterMode: boolean, state: GameState) {
+        if(scatterMode) {
+            if(!this.isEaten){
+                if(this.scatterMaterialCounter++ % 30 < 15)
+                    this.mesh.material = Ghost.SCATTER_MATERIAL_1
+                else
+                    this.mesh.material = Ghost.SCATTER_MATERIAL_2
+                this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
+            } else {
+                this.mesh.material = Ghost.SCATTER_MATERIAL_EAT
+                this.mesh.geometry = Ghost.EATEN_GEOMETRY
+                this.mesh.scale.set(1, 1, 1)
+            }
+        } else {
+            this.mesh.material = this.material
+            this.mesh.geometry = Ghost.LOADED_GEOMETRY
+            if(this.isEaten)
+                this.setGhostEaten(false, state)
+            this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
+        }
+    }
+
+    public playAudio( pacmanTarget: Pacman, scatterMode: boolean ) {
+        if(scatterMode && this.isEaten){
+            this.playEyesAudio()
+        } else {
+            this.playSirenAudio(pacmanTarget)
+        }
+    }
+
+    private playSirenAudio( pacmanTarget: Pacman ) {
+        if(Utils.distance(this.mesh.position, pacmanTarget.mesh.position) < Ghost.SIREN_DISTANCE 
+            && Ghost.SIREN_AUDIO.ended) {
+            Ghost.SIREN_AUDIO.play()
+        }
+    }
+
+    private playEyesAudio() {
+        if(Ghost.EYES_AUDIO.ended) {
+            Ghost.EYES_AUDIO.play()
         }
     }
 
     // Update ghost position based on current state
-    public move(delta: number, levelMap: World, state: GameState) {
-        if(!this.pacmanTarget) return
+    public move(delta: number, levelMap: World, pacmanTarget: Pacman, scatterMode: boolean) {
+        if(!this.pacmanTarget || this.pacmanTarget != pacmanTarget.id) return
 
         if(this.exitHome && Utils.distance(this.mesh.position, levelMap.exitGhostTarget) < 1)
             this.exitHome = false
-        let pacman: Pacman
-        if(this.exitHome) {
+
+        if(this.exitHome && !scatterMode) {
             this.positionTarget = levelMap.exitGhostTarget
+        } else if(scatterMode) {
+            this.positionTarget = levelMap.ghostHomeTarget
+            this.exitHome = true
         } else {
-            // Get pacman target
-            pacman = state.getPacmansMap().get(this.pacmanTarget)
-            if(!pacman) {
-                this.pacmanTarget = null
-                return
-            }
-            this.positionTarget = pacman.mesh.position
+            this.positionTarget = pacmanTarget.mesh.position
         }
+
         let previousPosition = new THREE.Vector3().copy(this.mesh.position).addScaledVector(this.direction, 0.5).round()
-        this.mesh.translateOnAxis(this.direction, delta * Ghost.GHOST_SPEED)
+        let ghostSpeed = this.isEaten ? Ghost.GHOST_SPEED_EATEN : Ghost.GHOST_SPEED
+        this.mesh.translateOnAxis(this.direction, delta * ghostSpeed)
         let currentPosition = new THREE.Vector3().copy(this.mesh.position).addScaledVector(this.direction, 0.5).round()
 
         // If the ghost is transitioning from one cell to the next, see if they can turn.
@@ -118,9 +167,9 @@ export class Ghost {
             let leftPosition = new THREE.Vector3().copy(this.mesh.position).add(leftTurn)
             let rightPosition = new THREE.Vector3().copy(this.mesh.position).add(rightTurn)
 
-            let forwardWall = levelMap.isWall(currentPosition, this.exitHome)
-            let leftWall = levelMap.isWall(leftPosition, this.exitHome)
-            let rightWall = levelMap.isWall(rightPosition, this.exitHome)
+            let forwardWall = levelMap.isWall(currentPosition, this.exitHome )
+            let leftWall = levelMap.isWall(leftPosition, this.exitHome )
+            let rightWall = levelMap.isWall(rightPosition, this.exitHome )
 
             let distances : Array<[number, THREE.Vector3]> = []
             let minDistance: [number, THREE.Vector3] = [1000, this.direction]
@@ -130,8 +179,9 @@ export class Ghost {
 
             for(let d of distances)
                 minDistance = d[0] < minDistance[0] ? d : minDistance
-            let makeError = Math.floor(Math.random() * 5) == 0 // [0,5]
-            if(makeError || (pacman && !pacman.isAlive) ) {
+
+            let makeError = Math.floor(Math.random() * 9) < 3 /* [0,9] */ && !scatterMode
+            if(makeError || (pacmanTarget && !pacmanTarget.isAlive) ) {
                 let index = Math.floor(Math.random() * distances.length)
                 this.direction.copy(distances[index][1])
             } else {
@@ -152,7 +202,7 @@ export class Ghost {
         obj["direction"] = [ this.direction.x, this.direction.y, this.direction.z]
         obj["initialPosition"] = [ this.initialPosition.x, this.initialPosition.y, this.initialPosition.z]
         obj["pacmanTarget"] = this.pacmanTarget
-        obj["state"] = this.state
+        obj["isEaten"] = this.isEaten
         obj["exitHome"] = this.exitHome
         return obj
     }
@@ -170,7 +220,7 @@ export class Ghost {
         this.direction.set(obj["direction"][0], obj["direction"][1], obj["direction"][2])
         this.initialPosition.set(obj["initialPosition"][0], obj["initialPosition"][1], obj["initialPosition"][2])
         this.pacmanTarget = obj["pacmanTarget"]
-        this.state = obj["state"]
+        this.isEaten = obj["isEaten"]
         this.exitHome = obj["exitHome"]
     }
 }
