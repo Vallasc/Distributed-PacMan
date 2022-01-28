@@ -20,6 +20,9 @@ export class Pacman {
     static readonly EAT_DOT2_AUDIO = new Audio("./audio/dot_2.mp3")
     static readonly DEATH_AUDIO = new Audio("./audio/death.mp3")
     static readonly EXTRA_LIFE_AUDIO = new Audio("./audio/extra_life.mp3")
+    static readonly EAT_GHOST_AUDIO = new Audio("./audio/eat_ghost.mp3")
+    static readonly POWER_UP_AUDIO = new Audio("./audio/power_up.mp3")
+
 
     public id: string
     public name: string
@@ -34,7 +37,6 @@ export class Pacman {
     public isAlive: boolean
     public nLives: number
     public lostTime: number
-    public isMoving: boolean
 
     public transparentMode: boolean = false
 
@@ -47,13 +49,13 @@ export class Pacman {
 
     public distanceMoved: number
     public direction: THREE.Vector3
+    public clock: number
 
-    constructor(id: string, name: string, peerId: number, position: THREE.Vector3) {
+    constructor(id: string, name: string) {
         this.id = id
         this.name = name
         this.isPlaying = false
         this.isOnline = true
-        this.peerId = peerId
 
         // Create spheres with decreasingly small horizontal sweeps, in order
         // to create pacman "death" animation.
@@ -72,18 +74,22 @@ export class Pacman {
         this.distanceMoved = 0
 
         // Initialize pacman facing to the left.
-        this.mesh.position.copy(position)
-        this.direction = new THREE.Vector3(-1, 0, 0)
+        //this.mesh.position.copy(position)
+        this.direction = new THREE.Vector3().copy(Utils.BOTTOM)
         
         this.makeYouDieText()
         this.makeGameOverText()
 
-        this.isMoving = false
         this.isAlive = true
         this.nLives = 3
         this.lostTime = -1
         this.mesh.isPacman = true
+        this.clock = 0
         Pacman.EAT_DOT1_AUDIO.onended = () => Pacman.EAT_DOT2_AUDIO.play()
+    }
+
+    public setPosition(position: THREE.Vector3){
+        this.mesh.position.copy(position)
     }
 
     // Update pacman mesh simulating the eat movement
@@ -160,7 +166,6 @@ export class Pacman {
     // Elaborate key pressed and change pacman position
     public move(delta: number, keys: KeyState, levelMap: World) {
     
-        this.isMoving = false
         // Move based on current keys being pressed.
         if (keys.getKeyState('KeyW') || keys.getKeyState('ArrowUp')) {
             // W - move forward
@@ -168,7 +173,6 @@ export class Pacman {
             // Because we are rotating the object above using lookAt, "forward" is to the left.
             this.mesh.translateOnAxis(Utils.LEFT, Pacman.PACMAN_SPEED * delta)
             this.distanceMoved += Pacman.PACMAN_SPEED * delta
-            this.isMoving = true
         }
         if (keys.getKeyState('KeyA') || keys.getKeyState('ArrowLeft')) {
             // A - rotate left
@@ -182,7 +186,6 @@ export class Pacman {
             // S - move backward
             this.mesh.translateOnAxis(Utils.LEFT, -Pacman.PACMAN_SPEED * delta)
             this.distanceMoved += Pacman.PACMAN_SPEED * delta
-            this.isMoving = true
         }
 
         // Check for collision with walls
@@ -215,22 +218,33 @@ export class Pacman {
             dot.pacmanId = this.id
             state.updateDotShared(dot)
             Pacman.EAT_DOT1_AUDIO.play()
+            if(dot.isPowerDot)
+                setTimeout(() => Pacman.POWER_UP_AUDIO.play(), 1000)
         }
     }
 
-    public checkGhostCollision(ghost: Ghost, timeNow: number) {
-        if(!this.transparentMode && this.isAlive && 
+    public checkGhostCollision(ghost: Ghost, state: GameState) { // TODO sostituire scatter mode
+        if(!this.transparentMode && this.isAlive &&
             Utils.distance(this.mesh.position, ghost.mesh.position) < Pacman.PACMAN_RADIUS*2){
-            console.log("YOU DIE")
-            this.nLives--
-            this.isAlive = false
-            if(this.nLives != 0){
-                setTimeout(()=>{
-                    this.isAlive = true
-                    Pacman.EXTRA_LIFE_AUDIO.play()
-                }, Pacman.TIME_AFTER_DIE)
+
+            if( !state.getScatterMode() ){
+                console.log("YOU DIE")
+                this.nLives--
+                this.isAlive = false
+                if(this.nLives != 0){
+                    setTimeout(()=>{
+                        this.isAlive = true
+                        Pacman.EXTRA_LIFE_AUDIO.play()
+                    }, Pacman.TIME_AFTER_DIE)
+                }
+                Pacman.DEATH_AUDIO.play()
+            } else if( !ghost.isEaten ) {
+                console.log("GHOST EAT")
+                state.setPacmanEatGhost(this, ghost)
+                ghost.setGhostEaten(true, state)
+                Pacman.EAT_GHOST_AUDIO.play()
+                setTimeout(() => Pacman.POWER_UP_AUDIO.play(), 1000)
             }
-            Pacman.DEATH_AUDIO.play()
         }
     }
 
@@ -286,18 +300,18 @@ export class Pacman {
         obj["position"] = [ this.mesh.position.x, this.mesh.position.y, this.mesh.position.z]
         obj["direction"] = [ this.direction.x, this.direction.y, this.direction.z]
         obj["distanceMoved"] = this.distanceMoved
-        obj["isMoving"] = this.isMoving
         obj["isPlaying"] = this.isPlaying
         obj["isOnline"] = this.isOnline
         obj["isAlive"] = this.isAlive
         obj["nLives"] = this.nLives
+        obj["clock"] = this.clock
         return obj
     }
 
     // New pacman from plain js object
     public static fromObj(obj: any): Pacman {
-        let position = new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2])
-        let out = new Pacman(obj["id"], obj["name"], obj["peerId"], position)
+        //let position = new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2])
+        let out = new Pacman(obj["id"], obj["name"])
         out.copyObj(obj)
         return out
     }
@@ -307,11 +321,12 @@ export class Pacman {
         this.mesh.position.set(obj["position"][0], obj["position"][1], obj["position"][2])
         this.direction.set(obj["direction"][0], obj["direction"][1], obj["direction"][2])
         this.distanceMoved = obj["distanceMoved"]
-        this.isMoving = obj["isMoving"]
         this.isPlaying = obj["isPlaying"]
         this.isOnline = obj["isOnline"]
         this.isAlive = obj["isAlive"]
         this.nLives = obj["nLives"]
+        this.clock = obj["clock"]
+
     }
 
     // Copy object if it has the same id
