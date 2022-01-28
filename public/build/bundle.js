@@ -43306,10 +43306,13 @@ var app = (function () {
 
     class Utils {
         static genRandomId() {
-            return Math.random().toString(36).substring(2, 15) +
-                Math.random().toString(36).substring(2, 15) +
-                Math.random().toString(36).substring(2, 15) +
-                Math.random().toString(36).substring(2, 15);
+            let random = "";
+            for (let i = 0; i < 5; i++)
+                random += Utils.getRandomString();
+            return random;
+        }
+        static getRandomString() {
+            return Math.random().toString(36).substring(8, 15);
         }
         static distance(object1, object2) {
             let difference = new Vector3();
@@ -63939,7 +63942,7 @@ var app = (function () {
 
     const { console: console_1 } = globals;
 
-    // (29:0) {#if $pacmanName != ""}
+    // (38:0) {#if $pacmanName != ""}
     function create_if_block(ctx) {
     	let game;
     	let current;
@@ -63976,7 +63979,7 @@ var app = (function () {
     		block,
     		id: create_if_block.name,
     		type: "if",
-    		source: "(29:0) {#if $pacmanName != \\\"\\\"}",
+    		source: "(38:0) {#if $pacmanName != \\\"\\\"}",
     		ctx
     	});
 
@@ -64080,13 +64083,24 @@ var app = (function () {
     		provider.disconnect();
     	});
 
+    	const urlParams = new URLSearchParams(window.location.search);
+    	let roomId = urlParams.get("room");
+
+    	if (roomId == null) {
+    		roomId = Utils.getRandomString();
+
+    		//urlParams.set("room", roomId)
+    		window.history.pushState(null, null, "?room=" + roomId);
+    	}
+
+    	console.log("Room id: " + roomId);
     	const ydoc = new Doc({ gc: garbageCollector });
     	const awareness = new Awareness(ydoc);
 
     	// Disable awareness
     	awareness.destroy();
 
-    	const provider = new WebrtcProvider('distribuited-pacman',
+    	const provider = new WebrtcProvider('distribuited_pacman_' + roomId,
     	ydoc,
     	{
     			signaling: ['wss://signaling.yjs.dev'],
@@ -64112,13 +64126,24 @@ var app = (function () {
     		pacmanName,
     		onDestroy,
     		GlobalConfig,
+    		Utils,
     		version,
+    		urlParams,
+    		roomId,
     		garbageCollector,
     		ydoc,
     		awareness,
     		provider,
     		$pacmanName
     	});
+
+    	$$self.$inject_state = $$props => {
+    		if ('roomId' in $$props) roomId = $$props.roomId;
+    	};
+
+    	if ($$props && "$$inject" in $$props) {
+    		$$self.$inject_state($$props.$$inject);
+    	}
 
     	return [$pacmanName, ydoc, provider];
     }
