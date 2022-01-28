@@ -9,10 +9,14 @@ export class Utils {
     static readonly BOTTOM = new THREE.Vector3(0, -1, 0)
 
     public static genRandomId(): string {
-        return Math.random().toString(36).substring(2, 15) + 
-                        Math.random().toString(36).substring(2, 15) + 
-                        Math.random().toString(36).substring(2, 15) + 
-                        Math.random().toString(36).substring(2, 15)
+        let random = ""
+        for( let i = 0; i < 5; i++ )
+            random += Utils.getRandomString()
+        return random
+    }
+
+    public static getRandomString(): string {
+        return Math.random().toString(36).substring(8, 15)
     }
 
     public static distance(object1: THREE.Vector3, object2: THREE.Vector3) {
