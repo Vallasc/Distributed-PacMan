@@ -1,25 +1,12 @@
 import * as THREE from "three"
-import type { WebrtcProvider } from "y-webrtc"
-import type { Ghost } from "./ghost"
-import { Pacman } from "./pacman"
+import type { Pacman } from "./pacman"
 import type { GameState } from "./state"
-import type { World } from "./world"
 export class Game {
-
-    static readonly GHOST_SPEED = Pacman.PACMAN_SPEED - 1
-    static readonly GHOST_RADIUS = Pacman.PACMAN_RADIUS * 1.25
-
     public createRenderer() {
-        let pixelRatio = window.devicePixelRatio
-        let AA = true
-        if (pixelRatio > 1) {
-          AA = false
-        }
-        
         let renderer = new THREE.WebGLRenderer({
-          antialias: AA,
+          antialias: false,
           //"high-performance", "low-power" or "default"
-          powerPreference: "high-performance",
+          powerPreference: "low-power",
           //"highp", "mediump" or "lowp"
           precision: "lowp"
         })
@@ -27,7 +14,6 @@ export class Game {
         renderer.setClearColor('black', 1.0)
         renderer.setSize(window.innerWidth, window.innerHeight)
         document.body.appendChild(renderer.domElement)
-        // Reduce resolution for performance
         return renderer
     }
 
@@ -72,17 +58,15 @@ export class Game {
 
             if(!ret)
                 requestAnimationFrame(render)
-                //setTimeout(render, 0)
         }
         requestAnimationFrame(render)
-        //setTimeout(render, 0)
     }
 
     // return map<pacmanId, [Pacman, ghostNumber]
     private computeAssignablePacmans(pacmansMap: Map<string, Pacman>): Map<string, [Pacman, number]> {
         let assignablePacmans = new Map<string, [Pacman, number]>()
         for(let p of pacmansMap){
-            if(p[1].isOnline){
+            if(p[1].isOnline && p[1].isPlaying){
                 assignablePacmans.set(p[0], [p[1], 0])
             }
         }
@@ -127,6 +111,8 @@ export class Game {
                     assignablePacmans = this.computeAssignablePacmans(pacmansMap)
 
                 let assignablePList = Array.from(assignablePacmans.values())
+                if(assignablePList.length == 0)
+                    return
                 let randomIndex = Math.floor(Math.random() * assignablePList.length)
                 let randomPacman: Pacman = assignablePList.at(randomIndex)[0]
                 assignablePacmans.delete(randomPacman.id)
@@ -138,7 +124,7 @@ export class Game {
         }
     }
 
-    public checkOfflinePacmans(provider: WebrtcProvider, state: GameState){
+    /*public checkOfflinePacmans(provider: WebrtcProvider, state: GameState){
         let connected = provider.awareness.getStates()
         //console.log(connected)
         for( let p of state.getPacmansList()){
@@ -146,36 +132,32 @@ export class Game {
                 if(p.isOnline){
                     p.isOnline = connected.has(p.peerId)
                     state.setPacman(p)
-                    //console.log("Pacman " + p.name + " status online: " + p.isOnline)
+                    console.log("Pacman " + p.name + " status online: " + p.isOnline)
                 }
-            } else { // It's me, i'm alive
-                p.isOnline = true
-                state.setPacman(p)
             }
         }
-    }
+    }*/
 
-    public lastGhostFreezePositions = new Map<string, THREE.Vector3>()
-    public lastGhostFakePositions = new Map<string, THREE.Vector3>()
-    public moveFakeGhost(ghost: Ghost, delta: number, map: World){
-        let lastFreezePosition = this.lastGhostFreezePositions.get(ghost.id)
-        let lastFakePosition = this.lastGhostFakePositions.get(ghost.id)
-        if(!lastFreezePosition){
-            lastFreezePosition = new THREE.Vector3()
-            this.lastGhostFreezePositions.set(ghost.id, lastFreezePosition)
-        }
-        if(!lastFakePosition){
-            lastFakePosition = new THREE.Vector3()
-            this.lastGhostFakePositions.set(ghost.id, lastFakePosition)
-        }
+    private pacmansClock = new Map<string, number>()
 
-        if(lastFreezePosition.equals(ghost.mesh.position)){
-            ghost.mesh.position.copy(lastFakePosition)
-            ghost.moveFake(delta, map)
-            lastFakePosition.copy(ghost.mesh.position)
-        } else {
-            lastFreezePosition.copy(ghost.mesh.position)
-            lastFakePosition.copy(ghost.mesh.position)
+    public checkOfflinePacmans(state: GameState) {
+        for( let p of state.getPacmansList()){
+            if(p.id != state.currentPacman.id && p.isOnline) {
+                if(this.pacmansClock.get(p.id) == null) {
+                    this.pacmansClock.set(p.id, p.clock);
+                    console.log("New Pacman " + p.name + ", status online")
+                }
+                    
+                if(p.clock == this.pacmansClock.get(p.id)) { // Offline - not updating ui
+                    p.isOnline = false
+                    state.setPacman(p)
+                    if( p.isPlaying )
+                        console.log("Lost Pacman " + p.name + ", status offline")
+                }
+                // console.log("Clock " + p.clock + ", CLock last " + this.pacmansClock.get(p.id))
+                // console.log("Pacman " + p.name + " status online: " + p.isOnline)
+                this.pacmansClock.set(p.id, p.clock);
+            }
         }
     }
 }
