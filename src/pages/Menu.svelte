@@ -33,11 +33,14 @@
 
     // Close connection when a tab loose focus
     document.onvisibilitychange = () => {
-        if (document.visibilityState === "hidden" && gameStarted && !gameEnded) {
-            closeConnection()
-            hideMenu = false
-            if( $globalState != null )
+        if( $globalState != null ){
+            let currentPacman = $globalState.currentPacman
+            if ( document.visibilityState === "hidden" && gameStarted 
+                    && currentPacman.nLives !=0 ) {
+                closeConnection()
+                hideMenu = false
                 $globalState.setGameEnded(true)
+            }
         }
     }
 
@@ -199,7 +202,7 @@
             <Loading></Loading>
         {/if}
         <div style="flex:1;"/>
-        <div class="credits">Credits: @Vallac</div>
+        <div class="credits">Credits: @Vallasc</div>
     </div>
 {/if}
 
