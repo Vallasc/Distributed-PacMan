@@ -32,6 +32,7 @@ export class GameState {
     public powerDotsEaten: number
     public lastPowerDotsEaten: number
     public gameEnded: boolean
+    public deadPacmans: Map<string, Pacman>
 
     constructor(ydoc: Y.Doc){
         this.ydoc =ydoc    
@@ -55,6 +56,7 @@ export class GameState {
         this.powerDotsEaten = 0
         this.lastPowerDotsEaten = 0
         this.gameEnded = false
+        this.deadPacmans = new Map<string, Pacman>()
     }
 
     public setCurrentPacman(currentPacman: Pacman){
@@ -71,6 +73,8 @@ export class GameState {
                 if(this.currentPacman && this.currentPacman.id != pLocal.id){
                     // Update pacman object
                     pLocal.copyObjIfSameId(value)
+                    if(!pLocal.nLives && !this.deadPacmans.get(pLocal.id))
+                        this.deadPacmans.set(pLocal.id, pLocal)
                 }
             } else { 
                 // Add new pacman object
@@ -88,11 +92,20 @@ export class GameState {
         this.pacmansShared.set(pacman.id, pacman.toPlainObj())
         this.pacmansLocal.set(pacman.id, pacman)
     }
+
+    public getPacman(id: string): Pacman {
+        return this.pacmansLocal.get(id)
+    }
+
     public getPacmansList(): IterableIterator<Pacman> {
         return this.pacmansLocal.values()
     }
     public getPacmansMap(): Map<string, Pacman> {
         return this.pacmansLocal
+    }
+
+    public getDeadPacmans() {
+        return this.deadPacmans.values()
     }
 
     public getPacmanIndex(pacman: Pacman): number {
