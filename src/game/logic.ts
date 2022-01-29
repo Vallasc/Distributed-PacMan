@@ -2,15 +2,18 @@ import * as THREE from "three"
 import type { Pacman } from "./pacman"
 import type { GameState } from "./state"
 export class Game {
+    public deadPacmans = new Map<Pacman, number>()
+    private pacmansClock = new Map<string, number>()
+
     public createRenderer() {
         let renderer = new THREE.WebGLRenderer({
           antialias: false,
-          //"high-performance", "low-power" or "default"
-          powerPreference: "low-power",
+          powerPreference: "high-performance",
           //"highp", "mediump" or "lowp"
-          precision: "lowp"
+          precision: "lowp",
+          alpha: false,
+          stencil: false
         })
-
         renderer.setClearColor('black', 1.0)
         renderer.setSize(window.innerWidth, window.innerHeight)
         document.body.appendChild(renderer.domElement)
@@ -29,7 +32,6 @@ export class Game {
 
         return scene
     }
-
 
     public gameLoop(callback : (delta: number, now: number) => any) {
         let previousFrameTime = window.performance.now()
@@ -62,7 +64,6 @@ export class Game {
         requestAnimationFrame(render)
     }
 
-    // return map<pacmanId, [Pacman, ghostNumber]
     private computeAssignablePacmans(pacmansMap: Map<string, Pacman>): Map<string, [Pacman, number]> {
         let assignablePacmans = new Map<string, [Pacman, number]>()
         for(let p of pacmansMap){
@@ -79,6 +80,7 @@ export class Game {
         let ghostsSize = 0
         let recomputeGhosts = false
         let assignablePacmans = this.computeAssignablePacmans(pacmansMap)
+        if(assignablePacmans.size == 0) return
 
         // Clean ghosts state
         // Remove from assignable all pacmans that are already assigned and are alive
@@ -97,15 +99,14 @@ export class Game {
             ghostsSize++
         }
 
-        let maxGhostPerPacman = Math.ceil(ghostsSize / assignablePacmans.size)
+        let minGhostPerPacman = Math.floor(ghostsSize / assignablePacmans.size)
         assignablePacmans.forEach((value) => {
             // Max ghosts excedeed
-            if(value[1] > maxGhostPerPacman){
-                recomputeGhosts = true
-            }
+            recomputeGhosts = recomputeGhosts || value[1] < minGhostPerPacman 
         })
+
         if(recomputeGhosts) {
-            let toPrint = "| Ghosts targets\n"
+            let toPrint = "Compute Ghosts targets\n"
             for(let ghost of ghosts){
                 if(assignablePacmans.size == 0 )
                     assignablePacmans = this.computeAssignablePacmans(pacmansMap)
@@ -117,28 +118,12 @@ export class Game {
                 let randomPacman: Pacman = assignablePList.at(randomIndex)[0]
                 assignablePacmans.delete(randomPacman.id)
                 ghost.pacmanTarget = randomPacman.id
-                toPrint += "| ghost" + ghost.id + "\t -> " + randomPacman.name + "\n"
+                toPrint += "\tghost" + ghost.id + "\t -> " + randomPacman.name + "\n"
             }
             console.log(toPrint)
             state.updateGhostsShared()
         }
     }
-
-    /*public checkOfflinePacmans(provider: WebrtcProvider, state: GameState){
-        let connected = provider.awareness.getStates()
-        //console.log(connected)
-        for( let p of state.getPacmansList()){
-            if(p.peerId != state.currentPacman.peerId){
-                if(p.isOnline){
-                    p.isOnline = connected.has(p.peerId)
-                    state.setPacman(p)
-                    console.log("Pacman " + p.name + " status online: " + p.isOnline)
-                }
-            }
-        }
-    }*/
-
-    private pacmansClock = new Map<string, number>()
 
     public checkOfflinePacmans(state: GameState) {
         for( let p of state.getPacmansList()){
@@ -151,13 +136,41 @@ export class Game {
                 if(p.clock == this.pacmansClock.get(p.id)) { // Offline - not updating ui
                     p.isOnline = false
                     state.setPacman(p)
-                    if( p.isPlaying )
-                        console.log("Lost Pacman " + p.name + ", status offline")
+                    console.log("Lost Pacman " + p.name + ", status offline")
                 }
-                // console.log("Clock " + p.clock + ", CLock last " + this.pacmansClock.get(p.id))
-                // console.log("Pacman " + p.name + " status online: " + p.isOnline)
                 this.pacmansClock.set(p.id, p.clock);
             }
         }
+    }
+
+    public printGhostsTarget(state: GameState){
+        let toPrint = "Ghosts\n"
+        for(let ghost of state.getGhosts()){
+                let pacmanName = (ghost.pacmanTarget)
+                        ? state.getPacman(ghost.pacmanTarget).name
+                        : "null"
+                toPrint += "\tghost" + ghost.id + "\t -> " + pacmanName + "\n"
+            }
+            console.log(toPrint)
+    }
+
+    public printPacmans(state: GameState){
+        let toPrint = "Pacmans\n"
+        for(let pacman of state.getPacmansList()){
+                toPrint += "\t" + pacman.name + ",\t\tonline: " +  pacman.isOnline + 
+                            ",\tplaying: " + pacman.isPlaying + "\n"
+            }
+            console.log(toPrint)
+    }
+
+    public findNewDeadPacman(state: GameState, frameCounter: number){
+        let newDeadPackman = new Array<Pacman>()
+        for(let pacman of state.getDeadPacmans()) {
+            if(!this.deadPacmans.get(pacman))
+                this.deadPacmans.set(pacman, frameCounter)
+            if(this.deadPacmans.get(pacman) == frameCounter)
+                newDeadPackman.push(pacman)
+        }
+        return  newDeadPackman
     }
 }

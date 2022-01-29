@@ -13,7 +13,7 @@ export class Camera{
 
     constructor(renderer: THREE.WebGLRenderer, pacman: Pacman){
         this.pacman = pacman
-        this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 2000)
+        this.camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2000)
         this.camera.up = (new THREE.Vector3()).copy(Utils.UP)
         this.targetPosition = (new THREE.Vector3()).copy(pacman.mesh.position).addScaledVector(Utils.UP, 5).addScaledVector(pacman.direction, -3)
         this.targetLookAt = (new THREE.Vector3()).copy(pacman.mesh.position).add(pacman.direction)
@@ -33,8 +33,8 @@ export class Camera{
             this.targetLookAt.copy(this.pacman.mesh.position).add(this.pacman.direction)
         } else {
             // After losing, move camera to look down at pacman's body from above.
-            this.targetPosition = this.pacman.mesh.position.clone().addScaledVector(Utils.UP, 20);
-            this.targetLookAt = this.pacman.mesh.position.clone().addScaledVector(this.pacman.direction, 0.01);
+            this.targetPosition.copy(this.pacman.mesh.position).addScaledVector(Utils.UP, 20);
+            this.targetLookAt.copy(this.pacman.mesh.position).addScaledVector(this.pacman.direction, 0.01);
         }
         // Move camera slowly during win/lose animations.
         //let cameraSpeed = (lost || won) ? 1 : 10

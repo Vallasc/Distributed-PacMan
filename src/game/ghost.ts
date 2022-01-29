@@ -1,10 +1,11 @@
 import type { BufferGeometry } from 'three'
 import * as THREE from 'three'
-import { STLLoader } from 'three/examples/jsm/loaders/STLLoader'
+import { STLLoader } from 'three/examples/jsm/loaders/STLLoader.js'
 import { Dot, World } from './world'
 import type { Pacman } from './pacman'
 import { Mesh, Utils } from './utils'
 import type { GameState } from './state'
+import { GlobalConfig } from './global_config'
 
 export class Ghost {
     static readonly GHOST_SCALE = 0.162
@@ -13,13 +14,12 @@ export class Ghost {
     static readonly GHOST_SPEED_EATEN = Ghost.GHOST_SPEED * 2
     static readonly SCATTER_MATERIAL_1 = new THREE.MeshBasicMaterial({ color: 'white', side: THREE.DoubleSide })
     static readonly SCATTER_MATERIAL_2 = new THREE.MeshBasicMaterial({ color: 'blue', side: THREE.DoubleSide })
-    static readonly SCATTER_MATERIAL_EAT = new THREE.MeshBasicMaterial({ color: 'white', side: THREE.DoubleSide })
     static readonly SIREN_DISTANCE = 5
     static readonly SIREN_AUDIO = new Audio("./audio/siren_1.mp3")
     static readonly EYES_AUDIO = new Audio("./audio/eyes.mp3")
 
     static LOADED_GEOMETRY: BufferGeometry
-    static readonly EATEN_GEOMETRY: THREE.SphereGeometry = new THREE.SphereGeometry(Dot.DOT_RADIUS);
+    static readonly EATEN_GEOMETRY: THREE.SphereBufferGeometry = new THREE.SphereBufferGeometry(Dot.DOT_RADIUS);
 
     public scatterMaterialCounter: number
     public material: THREE.MeshPhongMaterial
@@ -34,6 +34,14 @@ export class Ghost {
     public id: string
     public exitHome: boolean
 
+    //Utils vectors
+    private previousPosition = new THREE.Vector3()
+    private currentPosition = new THREE.Vector3()
+    private leftTurn = new THREE.Vector3()
+    private rightTurn = new THREE.Vector3()
+    private leftPosition = new THREE.Vector3()
+    private rightPosition = new THREE.Vector3()
+    
     constructor(id: string, position: THREE.Vector3, color: THREE.ColorRepresentation, afterLoading: () => void = ()=>{}){
         if(Ghost.LOADED_GEOMETRY == null){
             let stlLoader = new STLLoader()
@@ -97,14 +105,14 @@ export class Ghost {
 
     public updateMaterial(scatterMode: boolean, state: GameState) {
         if(scatterMode) {
+            if(this.scatterMaterialCounter++ % 20 < 10)
+                this.mesh.material = Ghost.SCATTER_MATERIAL_1
+            else
+                this.mesh.material = Ghost.SCATTER_MATERIAL_2
+
             if(!this.isEaten){
-                if(this.scatterMaterialCounter++ % 20 < 10)
-                    this.mesh.material = Ghost.SCATTER_MATERIAL_1
-                else
-                    this.mesh.material = Ghost.SCATTER_MATERIAL_2
                 this.mesh.scale.set(Ghost.GHOST_SCALE, Ghost.GHOST_SCALE, Ghost.GHOST_SCALE)
             } else {
-                this.mesh.material = Ghost.SCATTER_MATERIAL_EAT
                 this.mesh.geometry = Ghost.EATEN_GEOMETRY
                 this.mesh.scale.set(1, 1, 1)
             }
@@ -154,33 +162,33 @@ export class Ghost {
         if(this.exitHome && Utils.distance(this.mesh.position, levelMap.exitGhostTarget) < 1)
             this.exitHome = false
 
-        let previousPosition = new THREE.Vector3().copy(this.mesh.position).addScaledVector(this.direction, 0.5).round()
+        this.previousPosition.copy( this.mesh.position ).addScaledVector(this.direction, 0.5).round()
         let ghostSpeed = this.isEaten ? Ghost.GHOST_SPEED_EATEN : Ghost.GHOST_SPEED
-        this.mesh.translateOnAxis(this.direction, delta * ghostSpeed)
-        let currentPosition = new THREE.Vector3().copy(this.mesh.position).addScaledVector(this.direction, 0.5).round()
+        this.mesh.translateOnAxis( this.direction, delta * ghostSpeed )
+        this.currentPosition.copy( this.mesh.position ).addScaledVector(this.direction, 0.5).round()
 
         // If the ghost is transitioning from one cell to the next, see if they can turn.
-        if (!currentPosition.equals(previousPosition)) {
-            let leftTurn = new THREE.Vector3().copy(this.direction).applyAxisAngle(Utils.UP, Math.PI / 2)
-            let rightTurn = new THREE.Vector3().copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2)
+        if (!this.currentPosition.equals(this.previousPosition)) {
+            this.leftTurn.copy( this.direction ).applyAxisAngle(Utils.UP, Math.PI / 2)
+            this.rightTurn.copy( this.direction ).applyAxisAngle(Utils.UP, -Math.PI / 2)
 
-            let leftPosition = new THREE.Vector3().copy(this.mesh.position).add(leftTurn)
-            let rightPosition = new THREE.Vector3().copy(this.mesh.position).add(rightTurn)
+            this.leftPosition.copy( this.mesh.position ).add(this.leftTurn)
+            this.rightPosition.copy( this.mesh.position ).add(this.rightTurn)
 
-            let forwardWall = levelMap.isWall(currentPosition, this.exitHome )
-            let leftWall = levelMap.isWall(leftPosition, this.exitHome )
-            let rightWall = levelMap.isWall(rightPosition, this.exitHome )
+            let forwardWall = levelMap.isWall( this.currentPosition, this.exitHome )
+            let leftWall = levelMap.isWall( this.leftPosition, this.exitHome )
+            let rightWall = levelMap.isWall( this.rightPosition, this.exitHome )
 
             let distances : Array<[number, THREE.Vector3]> = []
             let minDistance: [number, THREE.Vector3] = [1000, this.direction]
-            if(!leftWall) distances.push([Utils.distance(leftPosition, this.positionTarget), leftTurn])
-            if(!rightWall) distances.push([Utils.distance(rightPosition, this.positionTarget), rightTurn])
-            if(!forwardWall) distances.push([Utils.distance(currentPosition, this.positionTarget), this.direction])
+            if(!leftWall) distances.push([Utils.distance(this.leftPosition, this.positionTarget), this.leftTurn])
+            if(!rightWall) distances.push([Utils.distance(this.rightPosition, this.positionTarget), this.rightTurn])
+            if(!forwardWall) distances.push([Utils.distance(this.currentPosition, this.positionTarget), this.direction])
 
             for(let d of distances)
                 minDistance = d[0] < minDistance[0] ? d : minDistance
 
-            let makeError = Math.floor(Math.random() * 9) < 3 /* [0,9] */ && !scatterMode
+            let makeError = Math.floor(Math.random() * 9) < (GlobalConfig.ERROR_PROBABILITY_GHOST * 10) /* [0,9] */ && !scatterMode
             if(makeError || (pacmanTarget && !pacmanTarget.isAlive) ) {
                 let index = Math.floor(Math.random() * distances.length)
                 this.direction.copy(distances[index][1])

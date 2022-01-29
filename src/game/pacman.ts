@@ -3,8 +3,8 @@ import type { KeyState } from "./keyboard"
 import type { World } from "./world"
 import type { GameState } from "./state"
 import { Mesh, Utils } from "./utils"
-import { FontLoader } from 'three/examples/jsm/loaders/FontLoader'
-import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry'
+import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js'
+import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
 import JsonFont from "../font/Press_Start_2P_Regular.json";
 import type { Ghost } from "./ghost"
 
@@ -44,13 +44,21 @@ export class Pacman {
     public textMesh: THREE.Mesh
     public dieTextMesh: THREE.Mesh
     public gameOverTextMesh: THREE.Mesh
-    public frames: Array<THREE.SphereGeometry>
+    public static frames: Array<THREE.SphereBufferGeometry>
     // public color
 
     public distanceMoved: number
     public direction: THREE.Vector3
     public clock: number
 
+    // Vector utils
+    private leftSide = new THREE.Vector3()
+    private topSide = new THREE.Vector3()
+    private rightSide = new THREE.Vector3()
+    private bottomSide = new THREE.Vector3()
+    private lookAt = new THREE.Vector3()
+
+        
     constructor(id: string, name: string) {
         this.id = id
         this.name = name
@@ -59,18 +67,19 @@ export class Pacman {
 
         // Create spheres with decreasingly small horizontal sweeps, in order
         // to create pacman "death" animation.
-        let pacmanGeometries = new Array<THREE.SphereGeometry>()
-        let numFrames = 40
-        for (let i = 0; i < numFrames; i++) {
-            let offset = (i / (numFrames - 1)) * Math.PI
-            pacmanGeometries.push(new THREE.SphereGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2))
-            pacmanGeometries[i].rotateX(Math.PI / 2)
+        if(!Pacman.frames){
+            Pacman.frames = new Array<THREE.SphereBufferGeometry>()
+            let numFrames = 40
+            for (let i = 0; i < numFrames; i++) {
+                let offset = (i / (numFrames - 1)) * Math.PI
+                Pacman.frames.push(new THREE.SphereBufferGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2))
+                Pacman.frames[i].rotateX(Math.PI / 2)
+            }
         }
 
         let pacmanMaterial = Pacman.PACMAN_ONLINE_MATERIAL
 
-        this.mesh = new Mesh(pacmanGeometries[0], pacmanMaterial)
-        this.frames = pacmanGeometries
+        this.mesh = new Mesh(Pacman.frames[0], pacmanMaterial)
         this.distanceMoved = 0
 
         // Initialize pacman facing to the left.
@@ -96,12 +105,12 @@ export class Pacman {
     public update(currentPacman: Pacman, timeNow: number) {
         // Animate model
         let frame: number
-        if (!this.isAlive) {
+        if (!this.isAlive && this.nLives != 0) {
             if(this.lostTime == -1)
                 this.lostTime = timeNow
             // if pacman got eaten, show dying animation
             let angle = (timeNow - this.lostTime) * Math.PI / 2;
-            frame = Math.min(this.frames.length - 1, Math.floor(angle / Math.PI * this.frames.length));
+            frame = Math.min(Pacman.frames.length - 1, Math.floor(angle / Math.PI * Pacman.frames.length));
         } else {
             this.lostTime = -1
             // show eating animation based on how much pacman has moved
@@ -109,9 +118,9 @@ export class Pacman {
             let angle = (this.distanceMoved * 2) % (maxAngle * 2)
             if (angle > maxAngle)
                 angle = maxAngle * 2 - angle
-            frame = Math.floor(angle / Math.PI * this.frames.length)
+            frame = Math.floor(angle / Math.PI * Pacman.frames.length)
         }
-        this.mesh.geometry = this.frames[frame]
+        this.mesh.geometry = Pacman.frames[frame]
 
         // Update rotation based on direction so that mouth is always facing forward.
         // The "mouth" part is on the side of the sphere, make it "look" up but
@@ -119,7 +128,7 @@ export class Pacman {
         this.mesh.up.copy(this.direction).applyAxisAngle(Utils.UP, -Math.PI / 2)
         this.mesh.lookAt((new THREE.Vector3()).copy(this.mesh.position).add(Utils.UP))
 
-        if(!this.isOnline){
+        if(!this.isOnline || this.nLives == 0 ){
             this.mesh.material = Pacman.PACMAN_OFFLINE_MATERIAL
             if(this.textMesh){
                 this.textMesh.material = Pacman.PACMAN_OFFLINE_MATERIAL
@@ -137,7 +146,7 @@ export class Pacman {
             this.textMesh.position.copy(this.mesh.position).add(Utils.UP)
             // Rotate text so that it faces same direction as pacman.
             this.textMesh.up.copy(currentPacman.direction)
-            this.textMesh.lookAt(this.textMesh.position.clone().add(Utils.UP))
+            this.textMesh.lookAt(this.lookAt.copy(this.textMesh.position).add(Utils.UP))
             this.textMesh.rotateX(Math.PI/2)
             this.textMesh.visible = this.isAlive
         }
@@ -189,21 +198,21 @@ export class Pacman {
         }
 
         // Check for collision with walls
-        let leftSide = this.mesh.position.clone().addScaledVector(Utils.LEFT, Pacman.PACMAN_RADIUS).round()
-        let topSide = this.mesh.position.clone().addScaledVector(Utils.TOP, Pacman.PACMAN_RADIUS).round()
-        let rightSide = this.mesh.position.clone().addScaledVector(Utils.RIGHT, Pacman.PACMAN_RADIUS).round()
-        let bottomSide = this.mesh.position.clone().addScaledVector(Utils.BOTTOM, Pacman.PACMAN_RADIUS).round()
-        if (levelMap.isWall(leftSide)) {
-            this.mesh.position.x = leftSide.x + 0.5 + Pacman.PACMAN_RADIUS
+        this.leftSide.copy( this.mesh.position ).addScaledVector(Utils.LEFT, Pacman.PACMAN_RADIUS).round()
+        this.topSide.copy( this.mesh.position ).addScaledVector(Utils.TOP, Pacman.PACMAN_RADIUS).round()
+        this.rightSide.copy( this.mesh.position ).addScaledVector(Utils.RIGHT, Pacman.PACMAN_RADIUS).round()
+        this.bottomSide.copy( this.mesh.position ).addScaledVector(Utils.BOTTOM, Pacman.PACMAN_RADIUS).round()
+        if (levelMap.isWall(this.leftSide)) {
+            this.mesh.position.x = this.leftSide.x + 0.5 + Pacman.PACMAN_RADIUS
         }
-        if (levelMap.isWall(rightSide)) {
-            this.mesh.position.x = rightSide.x - 0.5 - Pacman.PACMAN_RADIUS
+        if (levelMap.isWall(this.rightSide)) {
+            this.mesh.position.x = this.rightSide.x - 0.5 - Pacman.PACMAN_RADIUS
         }
-        if (levelMap.isWall(topSide)) {
-            this.mesh.position.y = topSide.y - 0.5 - Pacman.PACMAN_RADIUS
+        if (levelMap.isWall(this.topSide)) {
+            this.mesh.position.y = this.topSide.y - 0.5 - Pacman.PACMAN_RADIUS
         }
-        if (levelMap.isWall(bottomSide)) {
-            this.mesh.position.y = bottomSide.y + 0.5 + Pacman.PACMAN_RADIUS
+        if (levelMap.isWall(this.bottomSide)) {
+            this.mesh.position.y = this.bottomSide.y + 0.5 + Pacman.PACMAN_RADIUS
         }
 
         // Wrap packman to level map

@@ -2,6 +2,8 @@ import * as THREE from "three"
 import { Ghost } from "./ghost"
 import type { GameState } from "./state"
 import { Mesh } from "./utils"
+import * as  BufferGeometryUtils from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+
 
 export class World {
 
@@ -86,11 +88,12 @@ export class World {
 
                 if (cell === '#') {
                     let wall = new Wall(x, y)
-                    wall.addToScene(scene)
+                    //wall.addToScene(scene)
+                   // wallMeshs.push(wall.mesh)
                     this.map[y][x] = wall
                 } else if (cell === 'X') {
                     let wall = new Wall(x, y, true)
-                    wall.addToScene(scene)
+                    //wall.addToScene(scene)
                     this.map[y][x] = wall
                 } else if (cell === '.') {
                     // Add dot to global shared state
@@ -122,6 +125,8 @@ export class World {
 
         this.centerX = (this.left + this.right) / 2
         this.centerY = (this.bottom + this.top) / 2
+
+        Wall.addWallsToScene(scene)
     }
 
     public getAt(position: THREE.Vector3): any {
@@ -152,32 +157,39 @@ export class World {
 
 
 class Wall {
+    public static wallsGeometry = new Array<THREE.BoxBufferGeometry>();
+    public static wallMaterial = new THREE.MeshLambertMaterial({ color: 'blue' })
     public isPassable: boolean
-    private mesh: Mesh;
 
     constructor(x: number, y: number, isPassable: boolean = false){
-        let wallGeometry = new THREE.BoxGeometry(1, 1, 1)
-        let wallMaterial = new THREE.MeshLambertMaterial({ color: 'blue' })
-        
-        this.mesh = new Mesh(wallGeometry, wallMaterial)
-        this.mesh.position.set(x, y, 0)
+        let wallGeometry = new THREE.BoxBufferGeometry(1, 1, 1)
+    
+        wallGeometry.translate(x, y, 0)
+        if(!isPassable)
+            Wall.wallsGeometry.push(wallGeometry)
         this.isPassable = isPassable
-        this.mesh.visible = !isPassable
-        this.mesh.isWall = true
     }
 
-    public addToScene(scene: THREE.Scene) {
-        scene.add(this.mesh)
+    public static addWallsToScene(scene: THREE.Scene) {
+        let merged = BufferGeometryUtils.mergeBufferGeometries(Wall.wallsGeometry)
+        let mesh = new Mesh(merged, Wall.wallMaterial)
+        mesh.matrixAutoUpdate = false
+        mesh.updateMatrix()
+        scene.add(mesh)
     }
 }
 
 
 export class Dot {
-    static readonly DOT_RADIUS = 0.1
-    static readonly DOT_RADIUS_POWER = Dot.DOT_RADIUS * 3
+    static readonly DOT_RADIUS = 0.12
+    static readonly DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2
 
     static readonly DOT_SCORE = 100
     static readonly POWER_DOT_SCORE = 200
+    public static material = new THREE.MeshLambertMaterial({ color: 'white' })
+    public static power_geometry = new THREE.SphereBufferGeometry(Dot.DOT_RADIUS_POWER)
+    public static geometry = new THREE.SphereBufferGeometry(Dot.DOT_RADIUS)
+
 
     private mesh: Mesh
     public id: string
@@ -187,14 +199,16 @@ export class Dot {
 
     constructor(id: string, position: THREE.Vector3, isPowerDot: boolean = false){
         this.isPowerDot = isPowerDot
-        let dotGeometry = isPowerDot ? new THREE.SphereGeometry(Dot.DOT_RADIUS_POWER) : new THREE.SphereGeometry(Dot.DOT_RADIUS)
-        let dotMaterial = new THREE.MeshLambertMaterial({ color: 0xFFDAB9 }) // Paech color
+        let dotGeometry = isPowerDot ? Dot.power_geometry : Dot.geometry
+        let dotMaterial = Dot.material
 
         this.mesh = new Mesh(dotGeometry, dotMaterial)
         this.mesh.position.copy(position)
         this.id = id
         this.pacmanId = null
         this.mesh.isDot = true
+        this.mesh.matrixAutoUpdate = false
+        this.mesh.updateMatrix()
     }
 
     public setVisible(value: boolean){
