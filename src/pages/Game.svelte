@@ -34,9 +34,9 @@
     
     let camera = new Camera(renderer, pacman)
     let hudCamera = new HUDCamera(map)
-    
+    let deadPacmans = new Array<Pacman>()
+        
     let frameCounter = 0
-    let recomputeGhostTargetFrame = Math.floor(Math.random() * 60)
     let isGameStarted = false
 
     let scatterTimer
@@ -49,26 +49,33 @@
             pacman.setPosition(map.pacmanSpawn[pId])
             clearInterval(interval)
             gameStartAudio.play()
-            setTimeout( () => isGameStarted = true, GlobalConfig.START_TIME )
+            setTimeout( () => {
+                isGameStarted = true
+
+                setTimeout(() => {
+                    game.printGhostsTarget(state)
+                    game.printPacmans(state)
+                }, 3000)
+
+            }, GlobalConfig.START_TIME )
         }
     }, 100)
 
-
     // Main game loop
     game.gameLoop( (delta, now) => {
-        ydoc.transact(()=>{
+        ydoc.transact(() => {
             // Update local state
             state.updatePacmanLocal(scene)
             state.updateGhostsLocal()
             state.updateDotsLocal()
 
-            if(state.isPowerDotEaten()){
+            if(state.isPowerDotEaten()) {
                 console.log("SCATTER MODE")
                 state.setScatterMode(true)
             }
 
             let scatterMode = state.getScatterMode()
-            if( scatterMode && !lastScatterMode ){
+            if( scatterMode && !lastScatterMode ) {
                 clearTimeout(scatterTimer)
                 scatterTimer = setTimeout( () => {
                     state.setScatterMode(false)
@@ -76,29 +83,32 @@
             }
             lastScatterMode = scatterMode
 
-            if(isGameStarted && pacman.isAlive){
+            if(isGameStarted && pacman.isAlive) {
                 pacman.move(delta, keys, map)
                 pacman.eatDot(state)
             }
 
             // Update other pacman frames
-            for( let p of state.getPacmansList()){
+            for( let p of state.getPacmansList()) {
                 p.update(pacman, now)
             }
             // Update pacam camera
             camera.updateCamera(delta, !pacman.isAlive)
 
             // Check offline clients
-            if(frameCounter % 60 == 0){
-                game.checkOfflinePacmans(state)
-            }
             // Compute target for necessary ghosts
-            if(frameCounter % recomputeGhostTargetFrame == 0){
+            if(frameCounter % 60 == 0) {
+                game.checkOfflinePacmans(state)
                 game.computeGhostTarget(state)
             }
 
+            if(frameCounter % 180 == 0) {
+                deadPacmans = game.findNewDeadPacman(state, frameCounter)
+                deadPacmans = deadPacmans
+            }
+
             // Update ghosts position
-            if(isGameStarted){
+            if(isGameStarted) {
                 for( let g of state.getGhosts()) {
                     g.updateMaterial(scatterMode, state)
                     // Update only ghosts that are mine
@@ -109,7 +119,7 @@
                     
                     // Mitigates the delay caused by a bad internet connection
                     //game.moveFakeGhost(g, delta, map)
-                    if(!state.checkGameEnded()){
+                    if(!state.checkGameEnded()) {
                         pacman.checkGhostCollision(g, state)
                         g.playAudio(pacman, scatterMode)
                     }
@@ -117,7 +127,8 @@
             }
 
             // Current pacman is online
-            pacman.isOnline = true
+
+            pacman.isOnline = pacman.nLives != 0
             pacman.clock = frameCounter
             // Set current pacman state
             state.setPacman(pacman)
@@ -134,33 +145,34 @@
         lives = pacman.nLives
         frameCounter++
 
-        return /*state.checkGameEnded() && isGameStarted*/ false
+        return false
     })
 
-    /*setInterval(()=>{
-        //console.log(Array.from(state.getPacmans()))
-        console.log(Array.from(state.getGhosts()))
-        //console.log("states")
-        //console.log(provider.awareness.getStates())
-        //console.log(provider.awareness.getLocalState())
-
-    }, 1000)*/
 </script>
 
+{#if deadPacmans.length}
+    <div class="offline-box">
+        {#each deadPacmans as pacman}
+            <div class="element-offline">
+                PacMan {pacman.name} is dead
+            </div>  
+        {/each}    
+    </div>
+{/if}
 <div class="score-box">
     <div>
-        <div class="element">
+        <div class="element-score">
             SCORE
         </div>
-        <div class="element">
+        <div class="element-score">
             {score}
         </div>
     </div>
     <div>
-        <div class="element">
+        <div class="element-score">
             LIVES
         </div>
-        <div class="element">
+        <div class="element-score">
             {lives}
         </div>
     </div>
@@ -172,8 +184,7 @@
         padding: 8px;
         right: 10px;
         top: 10px;
-        background-color: #000000d6;
-        color: #FFF;
+        background-color: #0000008c;
         z-index: 2;
         display: flex;
         flex-direction: row;
@@ -186,12 +197,42 @@
         border-style: solid;
     }
 
-    .element {
+    .offline-box {
+        position: absolute;
+        padding: 8px;
+        left: 10px;
+        top: 10px;
+        background-color: #0000008c;
+        color: #FFF;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        align-content: center;
+        justify-content: space-around;
+        align-items: center;
+        border-radius: 16px;
+        border-color: #FFF;
+        border-width: 4px;
+        border-style: solid;
+    }
+
+    .element-score {
         padding-top: 8px;
         padding-bottom: 8px;
         padding-left: 10px;
         padding-right: 10px;
         text-align: center;
-        font-size: clamp(12px, 2vw, 26px);
+        font-size: clamp(10px, 1.5vw, 22px);
+        color: #FFF;
+    }
+
+    .element-offline {
+        padding-top: 8px;
+        padding-bottom: 8px;
+        padding-left: 10px;
+        padding-right: 10px;
+        text-align: center;
+        font-size: clamp(10px, 1.5vw, 22px);
+        color: #FFF;
     }
 </style>
