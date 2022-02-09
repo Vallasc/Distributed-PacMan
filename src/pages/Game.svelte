@@ -6,18 +6,19 @@
     import { Pacman } from '../game/pacman'
     import { GameState } from '../game/state'
     import { pacmanName, pacmanId, globalState } from '../store'
-    import type { WebrtcProvider } from 'y-webrtc'
     import { KeyState } from '../game/keyboard';
     import { GlobalConfig } from '../game/global_config';
     
     export let ydoc: Y.Doc
+
+    console.log("Pacman name: " + $pacmanName)
 
     console.log("Game created")
 
     const gameStartAudio = new Audio("./audio/game_start.mp3")
 
     let score = 0
-    let lives = 3
+    let lives  = [true, true, true]
 
     let keys = new KeyState()
     let state = new GameState(ydoc)
@@ -28,7 +29,7 @@
     globalState.set(state)
 
     let map = new World(scene, state)
-    let pacman =  new Pacman($pacmanId, $pacmanName)
+    let pacman =  new Pacman($pacmanId, $pacmanName, lives.length)
     state.setCurrentPacman(pacman)
     pacman.addToScene(scene, pacman)
     
@@ -43,26 +44,36 @@
     let lastScatterMode = false
 
     let interval = setInterval(() => {
-        let started = state.checkIfAllPlaying()
-        if(started) {
-            let pId = state.getPacmanIndex(pacman)
-            pacman.setPosition(map.pacmanSpawn[pId])
+        if(state.checkIfStarted()) {
+            console.log("Started true")
             clearInterval(interval)
-            gameStartAudio.play()
-            setTimeout( () => {
-                isGameStarted = true
 
-                setTimeout(() => {
-                    game.printGhostsTarget(state)
-                    game.printPacmans(state)
-                }, 3000)
+            setTimeout(() => {
+                let pId = state.getPacmanIndex(pacman)
+                pacman.setPosition(map.pacmanSpawn[pId])
 
-            }, GlobalConfig.START_TIME )
+                gameStartAudio.play()
+                // Start game after START_TIME
+                setTimeout( () => {
+                    isGameStarted = true
+                    // Prtin pacman, ghosts report
+                    setTimeout(() => {
+                        game.printGhostsTarget(state)
+                        game.printPacmans(state)
+                    }, 2000)
+
+                }, GlobalConfig.START_TIME )
+            }, GlobalConfig.BEFORE_START_TIME )
         }
-    }, 100)
+    }, 200)
+
+    let lastTimeCheckOffline = window.performance.now()
+    let lastTimeComputeGhost = window.performance.now()
+    let lastTimeNewDeadPacman = window.performance.now()
 
     // Main game loop
-    game.gameLoop( (delta, now) => {
+    game.gameLoop( (delta, aniamtionTime, now) => {
+
         ydoc.transact(() => {
             // Update local state
             state.updatePacmanLocal(scene)
@@ -90,19 +101,27 @@
 
             // Update other pacman frames
             for( let p of state.getPacmansList()) {
-                p.update(pacman, now)
+                p.update(pacman, aniamtionTime)
             }
             // Update pacam camera
             camera.updateCamera(delta, !pacman.isAlive)
 
             // Check offline clients
             // Compute target for necessary ghosts
-            if(frameCounter % 60 == 0) {
-                game.checkOfflinePacmans(state)
+            if(now - lastTimeCheckOffline > 2000 ) { // each second
+                lastTimeCheckOffline = now
+                //console.log("CheckOffline");
+                game.checkOfflinePacmans(state, isGameStarted)
+            }
+            
+            if(now - lastTimeComputeGhost > 1000) {
+                lastTimeComputeGhost = now
+                //console.log("ComputeGhost");
                 game.computeGhostTarget(state)
             }
 
-            if(frameCounter % 180 == 0) {
+            if(now - lastTimeNewDeadPacman > 3000) {
+                lastTimeNewDeadPacman = now
                 deadPacmans = game.findNewDeadPacman(state, frameCounter)
                 deadPacmans = deadPacmans
             }
@@ -127,7 +146,6 @@
             }
 
             // Current pacman is online
-
             pacman.isOnline = pacman.nLives != 0
             pacman.clock = frameCounter
             // Set current pacman state
@@ -142,7 +160,10 @@
         hudCamera.render(renderer, scene)
 
         score = state.getScore()
-        lives = pacman.nLives
+        if(lives.length != pacman.nLives) {
+            lives = new Array(pacman.nLives)
+        }
+
         frameCounter++
 
         return false
@@ -159,6 +180,7 @@
         {/each}    
     </div>
 {/if}
+
 <div class="score-box">
     <div>
         <div class="element-score">
@@ -173,7 +195,10 @@
             LIVES
         </div>
         <div class="element-score">
-            {lives}
+            <div class="blank-image"/>
+            {#each lives as _}
+                <img src="./img/pacman.svg" alt="pacman life"/>
+            {/each}
         </div>
     </div>
 </div>
@@ -234,5 +259,16 @@
         text-align: center;
         font-size: clamp(10px, 1.5vw, 22px);
         color: #FFF;
+    }
+
+    .element-score img {
+        height:clamp(10px, 1.5vw, 22px);
+        margin-left: 3px;
+        margin-right: 3px;
+    }
+
+    .blank-image {
+        height:clamp(10px, 1.5vw, 22px); 
+        display: inline-block;
     }
 </style>
