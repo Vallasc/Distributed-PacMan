@@ -3,7 +3,7 @@ import type { Pacman } from "./pacman"
 import type { GameState } from "./state"
 export class Game {
     public deadPacmans = new Map<Pacman, number>()
-    private pacmansClock = new Map<string, number>()
+    private pacmansClock = new Map<string, [number, number]>() // [clock, retryCount]
 
     public createRenderer() {
         let renderer = new THREE.WebGLRenderer({
@@ -33,7 +33,7 @@ export class Game {
         return scene
     }
 
-    public gameLoop(callback : (delta: number, now: number) => any) {
+    public gameLoop(callback : (delta: number, now: number, fps: number) => any) {
         let previousFrameTime = window.performance.now()
 
         // How many seconds the animation has progressed in total.
@@ -56,7 +56,7 @@ export class Game {
             // Keep track of how many seconds of animation has passed.
             animationSeconds += animationDelta
 
-            let ret = callback(animationDelta, animationSeconds)
+            let ret = callback(animationDelta, animationSeconds, now)
 
             if(!ret)
                 requestAnimationFrame(render)
@@ -125,20 +125,29 @@ export class Game {
         }
     }
 
-    public checkOfflinePacmans(state: GameState) {
+    public checkOfflinePacmans(state: GameState, isGameStarted: boolean) {
         for( let p of state.getPacmansList()){
             if(p.id != state.currentPacman.id && p.isOnline) {
                 if(this.pacmansClock.get(p.id) == null) {
-                    this.pacmansClock.set(p.id, p.clock);
+                    this.pacmansClock.set(p.id, [p.clock, 0]);
                     console.log("New Pacman " + p.name + ", status online")
                 }
-                    
-                if(p.clock == this.pacmansClock.get(p.id)) { // Offline - not updating ui
-                    p.isOnline = false
-                    state.setPacman(p)
-                    console.log("Lost Pacman " + p.name + ", status offline")
+                
+                let pclock = this.pacmansClock.get(p.id)
+                if(p.clock == pclock[0] && isGameStarted) { // Offline - not updating ui
+                    //if(pclock[1] <= 0){
+                        //pclock[1] = 3
+                        p.isOnline = false
+                        //state.setPacman(p)
+                        if(isGameStarted)
+                            state.setPacman(p)
+                        console.log("Lost Pacman " + p.name + ", status offline")
+                    //} 
+                    /*else {
+                        pclock[1]--
+                    }*/
                 }
-                this.pacmansClock.set(p.id, p.clock);
+                pclock[0] = p.clock
             }
         }
     }
@@ -164,13 +173,13 @@ export class Game {
     }
 
     public findNewDeadPacman(state: GameState, frameCounter: number){
-        let newDeadPackman = new Array<Pacman>()
+        let newDeadPacman = new Array<Pacman>()
         for(let pacman of state.getDeadPacmans()) {
             if(!this.deadPacmans.get(pacman))
                 this.deadPacmans.set(pacman, frameCounter)
             if(this.deadPacmans.get(pacman) == frameCounter)
-                newDeadPackman.push(pacman)
+                newDeadPacman.push(pacman)
         }
-        return  newDeadPackman
+        return  newDeadPacman
     }
 }
