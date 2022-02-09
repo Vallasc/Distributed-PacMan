@@ -2,11 +2,13 @@
     import type * as Y from 'yjs'
     import { slide } from 'svelte/transition'
     import { quintInOut } from 'svelte/easing'
-    import { pacmanName, pacmanId, globalState } from '../store'
+    import { pacmanName, pacmanId, globalState, disconnectSignal } from '../store'
     import { Utils } from '../game/utils'
     import type { Pacman } from '../game/pacman'
     import Loading from './Loading.svelte'
     import type { WebrtcProvider } from 'y-webrtc'
+    import { GlobalConfig } from '../game/global_config';
+
 
     export let ydoc: Y.Doc
     export let provider: WebrtcProvider
@@ -35,9 +37,10 @@
     document.onvisibilitychange = () => {
         if( $globalState != null ){
             let currentPacman = $globalState.currentPacman
-            if ( document.visibilityState === "hidden" && gameStarted 
+            if ( document.visibilityState === "hidden" && pressStart 
                     && currentPacman.nLives !=0 ) {
-                closeConnection()
+                closePeerConnection()
+                errorGameStarted = true
                 hideMenu = false
                 $globalState.setGameEnded(true)
             }
@@ -58,17 +61,15 @@
 		if( value ) {
 			gameAlreadyStarted = value
             if(gameAlreadyStarted && insertName){
-                closeConnection()
+                closePeerConnection()
+                errorGameStarted = true
             }
 
             if($globalState != null){
                 // Check if all players are ready
                 if(!gameStarted){
-                    gameStarted = $globalState.checkIfAllPlaying()
-                    if(gameStarted){
-                        console.log("Game started")
-                        hideMenu = true
-                    }
+                    gameStarted = true
+                    startGame()
                 }
 
                 // Check if game is ended
@@ -80,7 +81,7 @@
                         clearInterval(mainInterval)
 
                         hideMenu = false
-                        provider.disconnect()
+                        closePeerConnection()
                         gameEndAudio.play()
                     }
                 }
@@ -100,9 +101,19 @@
         scores = scores // for svelte
     }
 
-    function closeConnection(){
-        errorGameStarted = true
-        provider.disconnect()
+    function closePeerConnection(){
+        console.log("Closing WebRTC connection")
+        try{
+            provider.disconnect()
+        } catch (e) {}
+    }
+
+    function closeSignalingServerConnection() {
+        console.log("Closing signalig server connection")
+        try{
+            provider.signalingConns[0].shouldConnect = false
+            provider.signalingConns[0].ws.close()
+        } catch(e){}
     }
 
     function handleSubmitName(e) {
@@ -114,7 +125,8 @@
             insertName = false
             pressStart = true
         } else {
-            closeConnection()
+            closePeerConnection()
+            errorGameStarted = true
         }
 	}
 
@@ -134,16 +146,22 @@
 
     function startGame(){
         clearInterval(intervalPacmanList)
-	    gameState.set("game_started", true)
+        gameState.set("game_started", true)
         $globalState.setCurrentPacmanPlaying(true)
         pressStart = false
+        if($disconnectSignal)
+            closeSignalingServerConnection()
+        
+        setTimeout(() => hideMenu = true, GlobalConfig.START_TIME * 2/3 )
+        gameStarted = true
+        console.log("Game started")
     }
 
 </script>
 
 {#if !hideMenu}
     <div class = "init" 
-        transition:slide={{delay: 400, duration: 700, easing: quintInOut }}
+        transition:slide={{delay: 300, duration: 700, easing: quintInOut }}
         style = "width: {wWidth + "px"}; height: {wHeight + "px"}">
         <img src="./img/pacman_logo.png" alt="pacman logo">
         {#if errorGameStarted}
@@ -200,6 +218,8 @@
             <div style="height:50px;"/>
             <h1>Waiting other players</h1>
             <Loading></Loading>
+            <div style="flex:3;"/>
+            <h1>Use W A S D to move</h1>
         {/if}
         <div style="flex:1;"/>
         <div class="credits">Credits: @Vallasc</div>
@@ -220,8 +240,8 @@
     }
 
     .init img {
-        margin-top: 20px;
-        width: clamp(200px, 40%, 700px);
+        margin-top: 35px;
+        width: clamp(200px, 30%, 700px);
     }
 
     .pacman-list {
@@ -235,14 +255,14 @@
     h1 {
         margin-top: 20px;
         text-align: center;
-        font-size: clamp(16px, 3vw, 30px);
+        font-size: clamp(16px, 1.8vw, 30px);
     }
 
     .text-box {
         margin-top: 10px;
         margin-bottom: 10px;
         text-align: center;
-        font-size: clamp(12px, 2vw, 26px);
+        font-size: clamp(14px, 1.4vw, 25px);
     }
 
     .list-row {
@@ -260,7 +280,7 @@
         box-shadow: 5px 5px #ee2a29;
         color: #231f20;
         cursor: pointer;
-        font-size: clamp(16px, 3vw, 30px);
+        font-size: clamp(16px, 1.8vw, 30px);
         outline: none;
         padding: 16px;
         text-align: center;
@@ -281,7 +301,7 @@
         border-radius: 10px;
         background-color: transparent;
         box-sizing: border-box;
-        font-size: clamp(16px, 3vw, 30px);
+        font-size: clamp(16px, 1.8vw, 30px);
     }
 
     input[type=text]:focus {
@@ -298,7 +318,7 @@
     }
 
     .credits {
-        font-size: clamp(10px, 2vw, 20px);
+        font-size: clamp(10px, 1vw, 20px);
         margin-bottom: 24px;
     }
  </style>
