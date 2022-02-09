@@ -184,8 +184,6 @@ export class Dot {
     static readonly DOT_RADIUS = 0.12
     static readonly DOT_RADIUS_POWER = Dot.DOT_RADIUS * 2
 
-    static readonly DOT_SCORE = 100
-    static readonly POWER_DOT_SCORE = 200
     public static material = new THREE.MeshLambertMaterial({ color: 'white' })
     public static power_geometry = new THREE.SphereBufferGeometry(Dot.DOT_RADIUS_POWER)
     public static geometry = new THREE.SphereBufferGeometry(Dot.DOT_RADIUS)
