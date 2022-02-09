@@ -51024,7 +51024,6 @@ var app = (function () {
     writable(new Array());
     class GameState {
         constructor(ydoc) {
-            this.ydoc = ydoc;
             this.gameState = ydoc.getMap('game_state');
             this.pacmansOrdered = ydoc.getArray('pacmans_array');
             this.pacmansShared = ydoc.getMap('pacmans_map');
