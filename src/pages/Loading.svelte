@@ -115,7 +115,7 @@
     .box .pacman:after {
         content: "";
         position: absolute;
-        background: #ffc107;
+        background: #ffe400;
         width: 60px;
         height: 30px;
         left: 40%;
@@ -130,7 +130,7 @@
         z-index: 12;
     }
     .box .pacman:after {
-        margin-top: -21px;
+        margin-top: -22px;
         border-radius: 0 0 50px 50px;
         -webkit-animation: down 0.4s infinite;
         -moz-animation: down 0.4s infinite;
