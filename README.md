@@ -1,8 +1,8 @@
 # Distribuited PacMan
 
 <img src="https://vallasc.github.io/Distribuited-PacMan/public/img/pacman_logo.png"
-     alt="Markdown Monster icon"
-     style="max-height:200px" center/>
+     alt="Pacman Distribuited Edition"
+     style="background-color: white" center/>
 
 
 This project aims to create a fully distribuited pacman clone.
