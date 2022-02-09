@@ -234,6 +234,10 @@ export class GameState {
         return out
     }
 
+    public checkIfStarted(): boolean {
+        return this.gameState.get("game_started")
+    }
+
     public checkGameEnded(): boolean {
         return this.allPacmanDied || (this.dotsEaten == this.dotsNumber) || this.gameEnded
         //return this.allPacmanDied || (this.dotsEaten >= 5)
