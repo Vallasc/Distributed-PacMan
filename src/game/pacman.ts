@@ -12,7 +12,7 @@ export class Pacman {
     static readonly PACMAN_SPEED = 3
     static readonly PACMAN_RADIUS = 0.4
 
-    static readonly PACMAN_ONLINE_MATERIAL = new THREE.MeshLambertMaterial({ color: 'yellow', side: THREE.DoubleSide })
+    static readonly PACMAN_ONLINE_MATERIAL = new THREE.MeshLambertMaterial({ color: '#ffe400', side: THREE.DoubleSide })
     static readonly PACMAN_OFFLINE_MATERIAL = new THREE.MeshLambertMaterial({ color: 'gray', side: THREE.DoubleSide })
 
     static readonly TIME_AFTER_DIE = 8000
@@ -59,7 +59,7 @@ export class Pacman {
     private lookAt = new THREE.Vector3()
 
         
-    constructor(id: string, name: string) {
+    constructor(id: string, name: string, nLives: number) {
         this.id = id
         this.name = name
         this.isPlaying = false
@@ -72,7 +72,7 @@ export class Pacman {
             let numFrames = 40
             for (let i = 0; i < numFrames; i++) {
                 let offset = (i / (numFrames - 1)) * Math.PI
-                Pacman.frames.push(new THREE.SphereBufferGeometry(Pacman.PACMAN_RADIUS, 32, 32, offset, Math.PI * 2 - offset * 2))
+                Pacman.frames.push(new THREE.SphereBufferGeometry(Pacman.PACMAN_RADIUS, 24, 24, offset, Math.PI * 2 - offset * 2))
                 Pacman.frames[i].rotateX(Math.PI / 2)
             }
         }
@@ -90,7 +90,7 @@ export class Pacman {
         this.makeGameOverText()
 
         this.isAlive = true
-        this.nLives = 3
+        this.nLives = nLives
         this.lostTime = -1
         this.mesh.isPacman = true
         this.clock = 0
@@ -105,21 +105,29 @@ export class Pacman {
     public update(currentPacman: Pacman, timeNow: number) {
         // Animate model
         let frame: number
-        if (!this.isAlive && this.nLives != 0) {
-            if(this.lostTime == -1)
-                this.lostTime = timeNow
-            // if pacman got eaten, show dying animation
-            let angle = (timeNow - this.lostTime) * Math.PI / 2;
-            frame = Math.min(Pacman.frames.length - 1, Math.floor(angle / Math.PI * Pacman.frames.length));
+
+        if (this.nLives != 0) {
+            if(!this.isAlive){
+                if(this.lostTime == -1)
+                    this.lostTime = timeNow
+                // if pacman got eaten, show dying animation
+                let angle = (timeNow - this.lostTime) * Math.PI / 2
+                frame = Math.min(Pacman.frames.length - 1, Math.floor(angle / Math.PI * Pacman.frames.length))
+            } else {
+                this.lostTime = -1
+                // show eating animation based on how much pacman has moved
+                let maxAngle = Math.PI / 4
+                let angle = (this.distanceMoved * 2) % (maxAngle * 2)
+                if (angle > maxAngle)
+                    angle = maxAngle * 2 - angle
+                frame = Math.floor(angle / Math.PI * Pacman.frames.length)
+            }
         } else {
-            this.lostTime = -1
-            // show eating animation based on how much pacman has moved
-            let maxAngle = Math.PI / 4
-            let angle = (this.distanceMoved * 2) % (maxAngle * 2)
-            if (angle > maxAngle)
-                angle = maxAngle * 2 - angle
-            frame = Math.floor(angle / Math.PI * Pacman.frames.length)
+            frame = 0
         }
+        if(!this.isOnline)
+            frame = 0
+
         this.mesh.geometry = Pacman.frames[frame]
 
         // Update rotation based on direction so that mouth is always facing forward.
@@ -178,7 +186,6 @@ export class Pacman {
         // Move based on current keys being pressed.
         if (keys.getKeyState('KeyW') || keys.getKeyState('ArrowUp')) {
             // W - move forward
-            //pacman.translateOnAxis(pacman.direction, PACMAN_SPEED * delta)
             // Because we are rotating the object above using lookAt, "forward" is to the left.
             this.mesh.translateOnAxis(Utils.LEFT, Pacman.PACMAN_SPEED * delta)
             this.distanceMoved += Pacman.PACMAN_SPEED * delta
@@ -202,6 +209,7 @@ export class Pacman {
         this.topSide.copy( this.mesh.position ).addScaledVector(Utils.TOP, Pacman.PACMAN_RADIUS).round()
         this.rightSide.copy( this.mesh.position ).addScaledVector(Utils.RIGHT, Pacman.PACMAN_RADIUS).round()
         this.bottomSide.copy( this.mesh.position ).addScaledVector(Utils.BOTTOM, Pacman.PACMAN_RADIUS).round()
+
         if (levelMap.isWall(this.leftSide)) {
             this.mesh.position.x = this.leftSide.x + 0.5 + Pacman.PACMAN_RADIUS
         }
@@ -319,8 +327,7 @@ export class Pacman {
 
     // New pacman from plain js object
     public static fromObj(obj: any): Pacman {
-        //let position = new THREE.Vector3(obj["position"][0], obj["position"][1], obj["position"][2])
-        let out = new Pacman(obj["id"], obj["name"])
+        let out = new Pacman(obj["id"], obj["name"], obj["nLives"])
         out.copyObj(obj)
         return out
     }
@@ -335,7 +342,6 @@ export class Pacman {
         this.isAlive = obj["isAlive"]
         this.nLives = obj["nLives"]
         this.clock = obj["clock"]
-
     }
 
     // Copy object if it has the same id
