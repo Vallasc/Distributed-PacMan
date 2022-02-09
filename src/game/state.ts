@@ -9,7 +9,6 @@ import { GlobalConfig } from './global_config'
 export const pacmans = writable(new Array<Pacman>());
 
 export class GameState {
-    private ydoc: Y.Doc
     private gameState: Y.Map<any>
 
     private pacmansOrdered: Y.Array<string> // Array<pacman_id>
@@ -35,7 +34,6 @@ export class GameState {
     public deadPacmans: Map<string, Pacman>
 
     constructor(ydoc: Y.Doc){
-        this.ydoc =ydoc    
         this.gameState = ydoc.getMap('game_state')
 
         this.pacmansOrdered = ydoc.getArray('pacmans_array')
