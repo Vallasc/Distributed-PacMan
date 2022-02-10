@@ -2,7 +2,7 @@
 
 <img src="https://vallasc.github.io/Distribuited-PacMan/public/img/pacman_logo.png"
      alt="Pacman Distribuited Edition"
-     style="background-color: white" center/>
+     width="200" center/>
 
 
 This project aims to create a fully distribuited Pac-Man clone using CRDTs.
