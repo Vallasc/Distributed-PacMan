@@ -5,7 +5,7 @@
      style="background-color: white" center/>
 
 
-This project aims to create a fully distribuited pacman clone.
+This project aims to create a fully distribuited Pac-Man clone using CRDTs.
 
 [Demo](https://vallasc.github.io/Distribuited-PacMan/public/?room=github)
 
