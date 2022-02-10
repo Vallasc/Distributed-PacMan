@@ -49,9 +49,9 @@
 	console.log(provider)
 	let debug : boolean = urlParams.get("debug") === "true";
 
-	provider.awareness.on('update', value => {
+	/*provider.awareness.on('update', value => {
 		console.log(provider.awareness.states.keys())
-	})
+	})*/
 
 </script>
 

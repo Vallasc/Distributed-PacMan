@@ -245,7 +245,7 @@ export class Pacman {
             Utils.distance(this.mesh.position, ghost.mesh.position) < Pacman.PACMAN_RADIUS*2){
 
             if( !state.getScatterMode() ){
-                console.log("YOU DIE")
+                console.log("YOU DIED")
                 this.nLives--
                 this.isAlive = false
                 if(this.nLives != 0){
@@ -301,7 +301,7 @@ export class Pacman {
     }
 
     public makeYouDieText() {
-        this.dieTextMesh = this.makeText("YOU DIE", 0.7, 0.2, "red")
+        this.dieTextMesh = this.makeText("YOU DIED", 0.7, 0.2, "red")
     }
 
     public makeGameOverText() {
