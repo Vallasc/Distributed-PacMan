@@ -34,7 +34,7 @@
 	if (location.protocol !== 'https:') {
     	password = null
 }
-	const provider: WebrtcProvider = new WebrtcProvider( 'distribuited_pacman_' + roomId, ydoc, {
+	const provider: WebrtcProvider = new WebrtcProvider( 'distributed_pacman_' + roomId, ydoc, {
 		signaling: ['wss://signaling.yjs.dev'],
 		password: password,
 		awareness: awareness,

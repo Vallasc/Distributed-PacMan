@@ -7,7 +7,7 @@
 </p>
 
 
-This project aims to create a fully distribuited Pac-Man clone using CRDTs.
+This project aims to create a fully distributed Pac-Man clone using CRDTs.
 
 [Demo](https://vallasc.github.io/Distribuited-PacMan/public/?room=github)
 
