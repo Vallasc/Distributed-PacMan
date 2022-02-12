@@ -86,7 +86,7 @@
             }
 
             let scatterMode = state.getScatterMode()
-            if( scatterMode && !lastScatterMode ) {
+            if( scatterMode && !lastScatterMode ) { // TODO
                 clearTimeout(scatterTimer)
                 scatterTimer = setTimeout( () => {
                     state.setScatterMode(false)
@@ -100,7 +100,7 @@
             }
 
             // Update other pacman frames
-            for( let p of state.getPacmansList()) {
+            for( let p of state.getPacmansList() ){
                 p.update(pacman, aniamtionTime)
             }
             // Update pacam camera
