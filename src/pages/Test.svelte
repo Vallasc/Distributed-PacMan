@@ -1,12 +1,13 @@
 <script lang="ts">
-    import type { WebrtcProvider } from "y-webrtc";
-    import { globalState, disconnectSignal } from '../store'
+    import type { WebrtcProvider } from "y-webrtc"
+    import { globalState, disconnectSignal, mute } from '../store'
 
     export let provider: WebrtcProvider
     
-    let transparent = false;
-    let disconnect = false;
-    let disconnectAfterStarted = true;
+    let transparent = true
+    let disconnect = false
+    let disconnectAfterStarted = true
+    $mute = true
 
     function disconnectPeer() {
         console.log("Disconnect: " + disconnect)
@@ -27,7 +28,7 @@
         }
     }
 
-
+    $: console.log("Mute: " + $mute)
     $: disconnect, disconnectPeer()
     $: transparent, transparentPacman()
     $: $disconnectSignal = disconnectAfterStarted, 
@@ -38,6 +39,10 @@
     <div>
         <input type="checkbox" name="transaprent" bind:checked={transparent}>
         <label for="scales">Transparent mode</label>
+    </div>
+    <div>
+        <input type="checkbox"  name="disconnect-signal" bind:checked={$mute}>
+        <label for="scales">Mute</label>
     </div>
     <div>
         <input type="checkbox"  name="disconnect-peer" bind:checked={disconnect}>

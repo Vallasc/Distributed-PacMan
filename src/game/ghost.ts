@@ -74,6 +74,11 @@ export class Ghost {
         Ghost.EYES_AUDIO.currentTime = 5
     }
 
+    public static setMute(mute: boolean) {
+        Ghost.SIREN_AUDIO.muted = mute
+        Ghost.EYES_AUDIO.muted = mute
+    }
+
     // Make 3d mesh
     public makeMesh(position: THREE.Vector3, color: THREE.ColorRepresentation) {
         this.material = new THREE.MeshPhongMaterial({ color: color, side: THREE.DoubleSide })

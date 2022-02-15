@@ -5,17 +5,21 @@
     import { World } from '../game/world'
     import { Pacman } from '../game/pacman'
     import { GameState } from '../game/state'
-    import { pacmanName, pacmanId, globalState } from '../store'
+    import { pacmanName, pacmanId, globalState, mute } from '../store'
     import { KeyState } from '../game/keyboard';
     import { GlobalConfig } from '../game/global_config';
+import { Ghost } from '../game/ghost';
     
     export let ydoc: Y.Doc
 
     console.log("Pacman name: " + $pacmanName)
-
     console.log("Game created")
 
     const gameStartAudio = new Audio("./audio/game_start.mp3")
+    $: gameStartAudio.muted = $mute
+    $: Pacman.setMute($mute)
+    $: Ghost.setMute($mute)
+
 
     let score = 0
     let lives  = [true, true, true]

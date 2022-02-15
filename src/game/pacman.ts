@@ -7,6 +7,7 @@ import { FontLoader } from 'three/examples/jsm/loaders/FontLoader.js'
 import { TextGeometry } from 'three/examples/jsm/geometries/TextGeometry.js'
 import JsonFont from "../font/Press_Start_2P_Regular.json";
 import type { Ghost } from "./ghost"
+import { mute } from '../store'
 
 export class Pacman {
     static readonly PACMAN_SPEED = 3
@@ -95,6 +96,15 @@ export class Pacman {
         this.mesh.isPacman = true
         this.clock = 0
         Pacman.EAT_DOT1_AUDIO.onended = () => Pacman.EAT_DOT2_AUDIO.play()
+    }
+
+    public static setMute(mute: boolean) {
+        Pacman.EAT_DOT1_AUDIO.muted = mute
+        Pacman.EAT_DOT2_AUDIO.muted = mute
+        Pacman.DEATH_AUDIO.muted = mute
+        Pacman.EXTRA_LIFE_AUDIO.muted = mute
+        Pacman.EAT_GHOST_AUDIO.muted = mute
+        Pacman.POWER_UP_AUDIO.muted = mute
     }
 
     public setPosition(position: THREE.Vector3){

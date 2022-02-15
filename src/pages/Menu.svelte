@@ -2,7 +2,7 @@
     import type * as Y from 'yjs'
     import { slide } from 'svelte/transition'
     import { quintInOut } from 'svelte/easing'
-    import { pacmanName, pacmanId, globalState, disconnectSignal } from '../store'
+    import { pacmanName, pacmanId, globalState, disconnectSignal, mute } from '../store'
     import { Utils } from '../game/utils'
     import type { Pacman } from '../game/pacman'
     import Loading from './Loading.svelte'
@@ -14,6 +14,7 @@
     export let provider: WebrtcProvider
 
     const gameEndAudio = new Audio("./audio/intermission.mp3")
+    $: gameEndAudio.muted = $mute
 
     // States
     // Show game screen if all other players are ready
