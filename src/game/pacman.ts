@@ -250,7 +250,7 @@ export class Pacman {
         }
     }
 
-    public checkGhostCollision(ghost: Ghost, state: GameState) { // TODO sostituire scatter mode
+    public checkGhostCollision(ghost: Ghost, state: GameState) {
         if(!this.transparentMode && this.isAlive &&
             Utils.distance(this.mesh.position, ghost.mesh.position) < Pacman.PACMAN_RADIUS*2){
 
