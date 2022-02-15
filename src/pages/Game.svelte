@@ -8,7 +8,7 @@
     import { pacmanName, pacmanId, globalState, mute } from '../store'
     import { KeyState } from '../game/keyboard';
     import { GlobalConfig } from '../game/global_config';
-import { Ghost } from '../game/ghost';
+    import { Ghost } from '../game/ghost';
     
     export let ydoc: Y.Doc
 
@@ -20,7 +20,6 @@ import { Ghost } from '../game/ghost';
     $: Pacman.setMute($mute)
     $: Ghost.setMute($mute)
 
-
     let score = 0
     let lives  = [true, true, true]
 
@@ -30,11 +29,12 @@ import { Ghost } from '../game/ghost';
     let game = new Game()
     let renderer = game.createRenderer()
     let scene = game.createScene()
-    globalState.set(state)
 
     let map = new World(scene, state)
     let pacman =  new Pacman($pacmanId, $pacmanName, lives.length)
     state.setCurrentPacman(pacman)
+    $globalState = state
+
     pacman.addToScene(scene, pacman)
     
     let camera = new Camera(renderer, pacman)

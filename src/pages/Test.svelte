@@ -20,17 +20,14 @@
         }
     }
 
-    function transparentPacman() {
-        console.log("Transparent: " + transparent)
+    $: console.log("Mute: " + $mute)
+    $: {
         if($globalState) {
+            console.log("Transparent: " + transparent)
             $globalState.currentPacman.transparentMode = transparent
-            $globalState.setPacman($globalState.currentPacman)
         }
     }
-
-    $: console.log("Mute: " + $mute)
     $: disconnect, disconnectPeer()
-    $: transparent, transparentPacman()
     $: $disconnectSignal = disconnectAfterStarted, 
                             console.log("Disconnect signal server after start: " + disconnectAfterStarted)
 </script>

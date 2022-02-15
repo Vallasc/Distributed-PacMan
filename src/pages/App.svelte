@@ -45,11 +45,10 @@
 		}
 	})
 
-
-	console.log(provider)
 	let debug : boolean = urlParams.get("debug") === "true";
 
-	/*provider.awareness.on('update', value => {
+	/*console.log(provider)
+	provider.awareness.on('update', value => {
 		console.log(provider.awareness.states.keys())
 	})*/
 
